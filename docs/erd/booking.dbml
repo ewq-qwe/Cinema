@@ -1,0 +1,87 @@
+// Проєкт №1 — CinemaBooking. Вставте вміст на https://dbdiagram.io/d → отримаєте ERD і посилання.
+Project CinemaBooking { database_type: 'SQLServer' }
+
+Table Customers {
+  Id bigint [pk, increment]
+  FullName nvarchar(150) [not null]
+  Email nvarchar(254) [not null, note: 'UNIQUE WHERE IsDeleted = 0; CHECK формат']
+  Phone varchar(13) [note: 'CHECK +380XXXXXXXXX']
+  CreatedAt datetime2 [not null, default: `SYSUTCDATETIME()`]
+  CreatedBy nvarchar(100)
+  UpdatedAt datetime2
+  UpdatedBy nvarchar(100)
+  IsDeleted bit [not null, default: 0]
+  RowVersion rowversion
+}
+
+Table Movies {
+  Id bigint [pk, note: '= Movies.Id у CinemaCatalog (локальна копія, без FK на іншу БД)']
+  Title nvarchar(200) [not null]
+  DurationMinutes int [not null, note: 'CHECK 1..600']
+  AgeRating varchar(5) [not null, note: "CHECK IN ('0+','6+','12+','16+','18+')"]
+  SyncedAt datetime2 [not null]
+}
+
+Table Halls {
+  Id int [pk, increment]
+  Name nvarchar(50) [not null, unique]
+  IsActive bit [not null, default: 1]
+}
+
+Table Seats {
+  Id int [pk, increment]
+  HallId int [not null, ref: > Halls.Id]
+  RowNumber tinyint [not null]
+  SeatNumber tinyint [not null]
+  SeatType varchar(10) [not null, default: 'Standard', note: "CHECK IN ('Standard','VIP')"]
+  indexes { (HallId, RowNumber, SeatNumber) [unique] }
+}
+
+Table Sessions {
+  Id bigint [pk, increment]
+  MovieId bigint [not null, ref: > Movies.Id]
+  HallId int [not null, ref: > Halls.Id]
+  StartsAt datetime2 [not null]
+  BasePrice decimal(10,2) [not null, note: 'CHECK > 0']
+  indexes {
+    (HallId, StartsAt) [unique]
+    (MovieId, StartsAt) [name: 'IX_Sessions_Movie_StartsAt', note: 'розклад фільму']
+  }
+}
+
+Table Bookings {
+  Id bigint [pk, increment]
+  CustomerId bigint [not null, ref: > Customers.Id]
+  SessionId bigint [not null, ref: > Sessions.Id]
+  Status varchar(20) [not null, default: 'Created', note: "CHECK IN ('Created','Paid','Used','Cancelled')"]
+  MovieTitle nvarchar(200) [not null, note: 'знімок']
+  SessionStartsAt datetime2 [not null, note: 'знімок']
+  TotalAmount decimal(10,2) [not null]
+  CancelReason nvarchar(300)
+  CreatedAt datetime2 [not null]
+  UpdatedAt datetime2
+  IsDeleted bit [not null, default: 0]
+  RowVersion rowversion
+  indexes {
+    (CustomerId, CreatedAt) [name: 'IX_Bookings_Customer', note: 'мої бронювання; WHERE IsDeleted = 0']
+    SessionId [name: 'IX_Bookings_Session_Unpaid', note: "WHERE Status = 'Created'"]
+  }
+}
+
+Table BookingPayments {
+  BookingId bigint [pk, note: 'PK = FK → 1:1']
+  Amount decimal(10,2) [not null]
+  Method varchar(10) [not null]
+  TransactionId varchar(64) [not null, unique]
+  PaidAt datetime2 [not null]
+}
+Ref: BookingPayments.BookingId - Bookings.Id [delete: cascade]
+
+Table Tickets {
+  BookingId bigint [pk, ref: > Bookings.Id]
+  SeatId int [pk, ref: > Seats.Id]
+  SessionId bigint [not null, ref: > Sessions.Id]
+  Price decimal(10,2) [not null, note: 'знімок ціни']
+  IsCancelled bit [not null, default: 0]
+  indexes { (SessionId, SeatId) [unique, name: 'UX_Tickets_SessionSeat_Active', note: 'WHERE IsCancelled = 0'] }
+}

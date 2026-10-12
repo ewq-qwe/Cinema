@@ -1,0 +1,32 @@
+# Локальне оточення: SQL Server (БД CinemaBooking і CinemaCatalog) + MongoDB (cinema_reviews).
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: cinema-sql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Cinema_Dev_2026!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqldata:/var/opt/mssql
+      - ./src/Booking/db:/scripts/booking:ro
+      - ./src/Catalog/db:/scripts/catalog:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      retries: 10
+
+  mongo:
+    image: mongo:7
+    container_name: cinema-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+      - ./src/Reviews/db:/scripts:ro
+
+volumes:
+  sqldata:
+  mongodata:

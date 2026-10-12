@@ -1,0 +1,76 @@
+[{
+	"_id": {
+		"$oid": "670000000000000000000d01"
+	},
+	"author": {
+		"customerId": 3,
+		"displayName": "Ірина Б."
+	},
+	"createdAt": {
+		"$date": "2026-10-03T10:00:00Z"
+	},
+	"isPinned": true,
+	"lastMessages": [
+		{
+			"messageId": {
+				"$oid": "670000000000000000000a03"
+			},
+			"author": "Тарас М.",
+			"excerpt": "Схоже на Ворохтянський віадук",
+			"createdAt": {
+				"$date": "2026-10-05T09:30:00Z"
+			}
+		}
+	],
+	"movieId": 1,
+	"movieTitle": "Карпатський експрес",
+	"stats": {
+		"messagesCount": 3,
+		"lastActivityAt": {
+			"$date": "2026-10-05T09:30:00Z"
+		}
+	},
+	"tags": [
+		"локації",
+		"Карпати"
+	],
+	"title": "Де знімали сцену на віадуку?"
+},
+{
+	"_id": {
+		"$oid": "670000000000000000000d02"
+	},
+	"author": {
+		"customerId": 2,
+		"displayName": "Тарас М."
+	},
+	"createdAt": {
+		"$date": "2026-10-08T10:00:00Z"
+	},
+	"isPinned": false,
+	"lastMessages": [
+		{
+			"messageId": {
+				"$oid": "670000000000000000000a04"
+			},
+			"author": "Олена К.",
+			"excerpt": "Доглядач знав усе з самого початку",
+			"createdAt": {
+				"$date": "2026-10-08T11:00:00Z"
+			}
+		}
+	],
+	"movieId": 2,
+	"movieTitle": "Таємниця старого маяка",
+	"stats": {
+		"messagesCount": 1,
+		"lastActivityAt": {
+			"$date": "2026-10-08T11:00:00Z"
+		}
+	},
+	"tags": [
+		"спойлери"
+	],
+	"title": "Теорії щодо фіналу (спойлери!)"
+}]
+

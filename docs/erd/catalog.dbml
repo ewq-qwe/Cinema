@@ -1,0 +1,58 @@
+// Проєкт №2 — CinemaCatalog. Вставте вміст на https://dbdiagram.io/d → отримаєте ERD і посилання.
+Project CinemaCatalog { database_type: 'SQLServer' }
+
+Table Genres {
+  Id int [pk, increment]
+  Name nvarchar(50) [not null, unique]
+  CreatedAt datetime2 [not null]
+  CreatedBy nvarchar(100)
+  UpdatedAt datetime2
+  UpdatedBy nvarchar(100)
+}
+
+Table Movies {
+  Id bigint [pk, increment, note: 'власник даних про фільми для всієї системи']
+  GenreId int [not null, ref: > Genres.Id, note: 'ON DELETE RESTRICT']
+  Title nvarchar(200) [not null]
+  ReleaseYear int [not null, note: 'CHECK 1895..2100']
+  DurationMinutes int [not null, note: 'CHECK 1..600']
+  AgeRating varchar(5) [not null, default: '0+']
+  IsDeleted bit [not null, default: 0]
+  RowVersion rowversion
+  CreatedAt datetime2 [not null]
+  CreatedBy nvarchar(100)
+  UpdatedAt datetime2
+  UpdatedBy nvarchar(100)
+  indexes {
+    Title [note: 'пошук за назвою']
+    (GenreId, ReleaseYear) [note: 'фільми жанру; WHERE IsDeleted = 0']
+    (Title, ReleaseYear) [unique]
+  }
+}
+
+Table MovieDetails {
+  MovieId bigint [pk, note: 'PK = FK → 1:1']
+  Description nvarchar(2000) [not null]
+  Country nvarchar(60) [not null]
+  TrailerUrl varchar(300)
+  PosterUrl varchar(300)
+}
+Ref: MovieDetails.MovieId - Movies.Id [delete: cascade]
+
+Table People {
+  Id int [pk, increment]
+  FullName nvarchar(150) [not null, note: 'індекс — пошук людини']
+  BirthYear int [note: 'CHECK 1850..2025']
+  CreatedAt datetime2 [not null]
+  CreatedBy nvarchar(100)
+  UpdatedAt datetime2
+  UpdatedBy nvarchar(100)
+}
+
+Table MovieCredits {
+  MovieId bigint [pk, ref: > Movies.Id, note: 'ON DELETE CASCADE']
+  PersonId int [pk, ref: > People.Id, note: 'ON DELETE RESTRICT']
+  Role varchar(10) [pk, note: "CHECK IN ('Actor','Director') — власне поле M:N"]
+  CharacterName nvarchar(100) [note: 'власне поле M:N']
+  BillingOrder int [not null, note: 'власне поле M:N; CHECK >= 0']
+}
