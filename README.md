@@ -1,7 +1,8 @@
 # Кінотеатр «Кадр» — мікросервісна платформа на .NET
 
 * **Лаб. 01** — три бази даних для мікросервісів (розділи нижче, від «Що де лежить»).
-* **Лаб. 02** — мікросервіс «Бронювання» як вертикаль DAL → BLL → API на ADO.NET + Dapper із запуском через .NET Aspire: розділ «Лаб. 02» в кінці файлу.
+* **Лаб. 02** — мікросервіс «Бронювання» як вертикаль DAL → BLL → API на ADO.NET + Dapper із запуском через .NET Aspire: розділ «Лаб. 02».
+* **Лаб. 03** — мікросервіс «Каталог» на EF Core: Code-First, Fluent API, міграції, Repository / Unit of Work, специфікації, FluentValidation, Serilog: розділ «Лаб. 03» в кінці файлу.
 
 **Домен.** Кінотеатр «Кадр» (вигаданий, 2 зали) продає квитки онлайн. Глядачі дивляться афішу, бронюють і оплачують місця на сеанс, а після перегляду пишуть відгуки й обговорюють фільми. Адміністратор веде каталог фільмів і розклад.
 
@@ -34,11 +35,11 @@ db/
     ├── collections.js     колекції з JSON Schema Validation + індекси
     ├── seed.js            тестові документи (ідемпотентно, upsert)
     └── queries.js         запити й агрегації
-src/Catalog/Catalog.Data/  модель EF Core Code First (Fluent API, HasData, міграції) — основа для Лаб. 03
 scripts/deploy.ps1         розгортання всіх трьох БД однією командою
-Platform.slnx              одне рішення на всю платформу (Лаб. 02)
+Platform.slnx              одне рішення на всю платформу
 Platform.AppHost/          оркестрація .NET Aspire (AppHost.cs)
-Services/Booking/          мікросервіс «Бронювання» (Проєкт №1): Booking.Api · Booking.Bll · Booking.Dal · Booking.Domain · Booking.Tests
+Services/Booking/          мікросервіс «Бронювання» (Проєкт №1, Лаб. 02): Booking.Api · Booking.Bll · Booking.Dal · Booking.Domain · Booking.Tests
+Services/Catalog/          мікросервіс «Каталог» (Проєкт №2, Лаб. 03): Catalog.Api (+ Dockerfile) · Catalog.Bll · Catalog.Dal · Catalog.Domain · Catalog.Tests
 ```
 
 | Артефакт | Файл |
@@ -87,7 +88,7 @@ powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
    docker exec cinema-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "Cinema_Dev_2026!" -C -I -b -W -f 65001 -i /scripts/p1/schema.sql
    ```
 3. **Проєкт №2:** `p2/schema.sql` → `p2/seed.sql` → `p2/security.sql` (та сама команда `sqlcmd`).
-   Альтернатива для `schema.sql` + `seed.sql`: `dotnet tool restore`, потім `dotnet ef database update --project src/Catalog/Catalog.Data` створює ту саму схему з тими самими даними через міграції EF Core.
+   Це проєкт схеми з Лаб. 01. Робоча БД мікросервісу «Каталог» (Лаб. 03) створюється міграціями EF Core — див. розділ «Лаб. 03».
 4. **Проєкт №3:** `p3/collections.js` → `p3/seed.js`:
    ```bash
    docker exec cinema-mongo mongosh --quiet /scripts/p3/collections.js
@@ -116,7 +117,7 @@ powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
 | Проєкт №1: CRUD-процедури, обмеження, недопустимі переходи, конкурентність, FK, права | `docker exec cinema-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "Cinema_Dev_2026!" -C -I -W -f 65001 -i /scripts/p1/verify.sql` |
 | Проєкт №1: пошук, пагінація, розклад, схема залу | та сама команда з `/scripts/p1/queries.sql` |
 | Повторний seed без дублікатів | та сама команда з `/scripts/p1/seed.sql` або `/scripts/p2/seed.sql`: таблиця кількостей не змінюється; `mongosh … /scripts/p3/seed.js` → «додано 0» |
-| Проєкт №2: модель EF Core збігається зі схемою | `dotnet run --project src/Catalog/Catalog.Data` |
+| Проєкт №2: міграції, сідінг і запити EF Core | див. розділ «Лаб. 03» |
 | Проєкт №3: агрегації, embedding/reference, валідація | `docker exec cinema-mongo mongosh --quiet /scripts/p3/queries.js` |
 
 **Самоперевірка з умови:**
@@ -334,3 +335,175 @@ Aspire Dashboard — `sql`, `BookingDb`, `booking-api` у статусі Running
 Swagger — перелік ендпоінтів:
 
 ![Swagger](docs/screenshots/lab02-swagger.jpg)
+
+---
+
+## Лаб. 03 — мікросервіс Catalog (EF Core, Code-First)
+
+Мікросервіс «Каталог фільмів» (Проєкт №2 з Лаб. 01) із тією самою будовою, що й Booking, але доступ до даних — на **EF Core**:
+- моделі й Fluent API, міграції, LINQ to Entities;
+- Async Generic Repository + 3 специфічні репозиторії + Unit of Work;
+- специфікації (Ardalis.Specification);
+- DTO + AutoMapper, DataAnnotations + FluentValidation;
+- ProblemDetails, Serilog.
+
+### Що потрібно
+
+**.NET SDK 10** і **Docker Desktop**. Інструмент `dotnet-ef` прописано в локальному маніфесті (`dotnet-tools.json`), достатньо виконати:
+
+```bash
+dotnet tool restore
+```
+
+### Запуск
+
+**Через Aspire (рекомендовано)** — SQL Server, обидві БД, Booking.Api і Catalog.Api однією командою:
+
+```bash
+dotnet run --project Platform.AppHost
+```
+
+`catalog-api` на старті сам застосовує міграції (`MigrateAsync`) до порожньої БД `CinemaCatalog` і запускає ідемпотентний сідінг. Swagger: http://localhost:5024/swagger. Dashboard: http://localhost:15180.
+
+**Окремо, проти SQL Server з docker compose:**
+
+```bash
+docker compose up -d --wait sqlserver
+```
+
+```bash
+dotnet run --project Services/Catalog/Catalog.Api
+```
+
+Рядок підключення `CatalogDb` (`appsettings.json`) веде на окрему БД `CinemaCatalogEf`. Її створюють міграції, а `CinemaCatalog` з docker compose — це SQL-проєкт схеми з Лаб. 01. Перевизначення: `ConnectionStrings__CatalogDb`.
+
+**Docker-образ:**
+
+```bash
+docker build -f Services/Catalog/Catalog.Api/Dockerfile -t cinema-catalog-api .
+```
+
+### Міграції
+
+Міграції лежать у [`Services/Catalog/Catalog.Dal/Migrations`](Services/Catalog/Catalog.Dal/Migrations): `InitialCreate` + знімок моделі. SQL-скрипт — [`Migrations/Scripts/InitialCreate.sql`](Services/Catalog/Catalog.Dal/Migrations/Scripts/InitialCreate.sql). DbContext — у `Catalog.Dal`, рядок підключення — у `Catalog.Api`, тому вказуються обидва проєкти.
+
+```bash
+dotnet ef migrations add <НазваЗміни> --project Services/Catalog/Catalog.Dal --startup-project Services/Catalog/Catalog.Api -o Migrations
+```
+
+```bash
+dotnet ef database update --project Services/Catalog/Catalog.Dal --startup-project Services/Catalog/Catalog.Api
+```
+
+```bash
+dotnet ef migrations script --idempotent --project Services/Catalog/Catalog.Dal --startup-project Services/Catalog/Catalog.Api -o Services/Catalog/Catalog.Dal/Migrations/Scripts/InitialCreate.sql
+```
+
+### Будова
+
+| Проєкт | Вміст |
+|---|---|
+| `Catalog.Domain` | сутності `Genre`, `Movie`, `MovieDetail` (1:1), `Person`, `MovieCredit` (M:N з полями `Role`, `CharacterName`, `BillingOrder`, `CreditedAt`). Приватні setter-и, валідація в конструкторах, зміни лише методами (`ChangeDuration`, `SetDetail`, `AddCredit`, `RemoveCredit`, `Archive`). Винятки `DomainException`, `EntityNotFoundException`, `ConflictException`, `ValidationException` |
+| `Catalog.Dal` | `CatalogDbContext` (`ApplyConfigurationsFromAssembly`), `Configurations/` (окремий `IEntityTypeConfiguration<T>` на кожну сутність: таблиці, ключі, довжини, `decimal(18,2)`, UNIQUE, CHECK, зв'язки, `HasData` жанрів), `Migrations/`, `GenericRepository<T>`, 3 специфічні репозиторії, `UnitOfWork`, `Seeding/DbInitializer` |
+| `Catalog.Bll` | сервіси (`MovieService`, `GenreService`, `PersonService`), DTO, `Specifications/` (`MoviesFilterSpec`, `PeopleFilterSpec`), `Validators/` (FluentValidation), профілі AutoMapper |
+| `Catalog.Api` | тонкі контролери, явний виклик валідаторів, `ExceptionToProblemDetailsHandler`, `CorrelationIdMiddleware`, Serilog, Swagger, Dockerfile |
+| `Catalog.Tests` | 24 тести: правила сутностей, специфікації в пам'яті, репозиторії на EF InMemory, сервіс, валідатори, AutoMapper |
+
+### Репозиторії й Unit of Work
+
+| Репозиторій | Спосіб завантаження | Специфічний запит |
+|---|---|---|
+| `GenericRepository<T>` | — | `GetByIdAsync`, `GetAllAsync`, `AddAsync` (async); `Update`, `Delete` (лише стан у контексті); `ListAsync(spec)`, `CountAsync(spec)` |
+| `MovieRepository` | **Eager** — `Include(Genre).Include(Detail).Include(Credits).ThenInclude(Person)` | картка фільму **одним** SQL-запитом |
+| `GenreRepository` | **Explicit** — `Entry(genre).Collection(g => g.Movies).Query()…LoadAsync()` | жанр, а потім його фільми **другим** запитом |
+| `MovieCreditRepository` | **LINQ to Entities через проміжну сутність** | фільмографія (`MovieCredit → Movie → Genre` з полями зв'язку); головні ролі (фільтр за `Role`, `BillingOrder`) |
+
+`UnitOfWork` об'єднує репозиторії над одним `DbContext` (Scoped). `SaveChangesAsync()` викликається **один раз** наприкінці бізнес-операції. Репозиторії самі нічого не зберігають. Помилки БД перетворюються на доменні: конфлікт RowVersion або UNIQUE → `ConflictException`.
+
+Перевірено в лозі SQL ([`docs/screenshots/lab03-sql-eager-vs-explicit.log`](docs/screenshots/lab03-sql-eager-vs-explicit.log)): eager — **1** запит, explicit — **2**.
+
+### Ендпоінти
+
+| Метод | Шлях | Статуси |
+|---|---|---|
+| GET | `/api/movies?page=&pageSize=&search=&genreId=&yearFrom=&yearTo=&ageRating=&sortBy=title\|year\|duration&sortDir=asc\|desc` | 200, 400 |
+| GET | `/api/movies/{id}` — картка (eager) | 200, 404 |
+| POST | `/api/movies` | 201 + Location, 400, 409 (дубль «назва + рік») |
+| PUT | `/api/movies/{id}` (з `rowVersion`) | 200, 400, 404, 409 |
+| PUT | `/api/movies/{id}/detail` (1:1) | 200, 400, 404 |
+| POST | `/api/movies/{id}/credits` (M:N) | 200, 400, 404, 409 (правила титрів) |
+| DELETE | `/api/movies/{id}/credits/{personId}/{role}` | 204, 404, 409 |
+| DELETE | `/api/movies/{id}` — в архів | 204, 404 |
+| GET | `/api/genres` · `/api/genres/{id}` (explicit) | 200, 404 |
+| POST · DELETE | `/api/genres` · `/api/genres/{id}` | 201 / 204, 400, 404, 409 |
+| GET | `/api/people?page=&pageSize=&search=&bornFrom=&bornTo=&sortBy=name\|birthYear&sortDir=` | 200, 400 |
+| GET · POST | `/api/people/{id}` · `/api/people` | 200 / 201, 400, 404 |
+| GET | `/api/people/{id}/filmography` (M:N LINQ) | 200, 404 |
+| GET | `/api/people/leads?genre=&maxBillingOrder=` (M:N LINQ) | 200, 400 |
+
+### Пагінація, фільтрація, сортування
+
+- **Запит:** `page` (з 1), `pageSize` (10 за замовчуванням, максимум 50), фільтри, `sortBy` / `sortDir`. Сортувати можна лише за полями з білого списку, інше — 400.
+- **Відповідь:** `items`, `totalCount`, `page`, `pageSize`, `totalPages`, `hasNext`, `hasPrevious`. Ці ж метадані дублюються в заголовках `X-Pagination-TotalCount`, `X-Pagination-TotalPages`, `X-Pagination-Page`, `X-Pagination-PageSize`.
+- **Реалізація:** `MoviesFilterSpec` / `PeopleFilterSpec` описують `Where`, `Include`, `OrderBy`, `Skip` / `Take`. Репозиторій застосовує їх через `WithSpecification()` — це один SQL `… ORDER BY … OFFSET … FETCH`. `CountAsync(spec)` рахує `COUNT(*)` за тими самими критеріями без пагінації. Обидві специфікації працюють через той самий `GenericRepository` без змін у ньому.
+
+### Валідація та помилки
+
+| Рівень | Що перевіряє | Відповідь |
+|---|---|---|
+| DataAnnotations на DTO | `Required`, `StringLength`, `Range` | 400 `ValidationProblemDetails` (автоматично) |
+| FluentValidation (`Catalog.Bll/Validators`, явний виклик у контролерах) | рік випуску, тривалість, віковий рейтинг, формат RowVersion і URL, правила ролей у титрах, білий список сортування, `yearFrom ≤ yearTo` | 400 `ValidationProblemDetails` |
+| Сервіси (BLL) | існування жанру / людини, унікальність «назва + рік», жанр без фільмів | 400 / 409 |
+| Сутності (Domain) | інваріанти моделі | 409 `DomainException` |
+
+`ExceptionToProblemDetailsHandler`:
+- `EntityNotFoundException` → **404**;
+- `ValidationException` → **400**;
+- `ConflictException` / `DomainException` → **409**;
+- решта → **500**, і подробиці віддаються лише в Development.
+
+Кожен виняток логується один раз.
+
+### Логування (Serilog)
+
+Налаштування — розділ `Serilog` в [`appsettings.json`](Services/Catalog/Catalog.Api/appsettings.json):
+- **sinks:** Console і File (`logs/catalog-*.json`, compact JSON, ротація щодня);
+- **рівні:** Information за замовчуванням; `Microsoft.EntityFrameworkCore.Database.Command` = Information, тож у лог потрапляють SQL-запити EF Core;
+- **властивості:** `CorrelationIdMiddleware` додає `CorrelationId` (заголовок `X-Correlation-Id` або згенерований, повертається у відповіді), `RequestPath`, `UserId`; `UseSerilogRequestLogging` пише один рядок на запит.
+
+Рівні змінюються змінними оточення, наприклад `Serilog__MinimumLevel__Default=Warning`.
+
+### Тести
+
+```bash
+dotnet test --project Services/Catalog/Catalog.Tests
+```
+
+### Самоперевірка з умови
+
+| Перевірка | Результат |
+|---|---|
+| eager-репозиторій виконує 1 запит, explicit — 2 | ✅ [`lab03-sql-eager-vs-explicit.log`](docs/screenshots/lab03-sql-eager-vs-explicit.log) |
+| POST з порожнім Title → 400 з помилками по полях | ✅ знімок нижче |
+| повторне створення з тим самим «назва + рік» → 409; неіснуючий Id → 404 ProblemDetails | ✅ |
+| `page=2&pageSize=2` → `totalCount` = усі записи (6), а не розмір сторінки | ✅ знімок нижче |
+| повторний запуск не дублює seed-дані | ✅ у лозі «Seeding: дані каталогу вже є — пропущено», кількості 6 / 8 незмінні |
+| друга специфікація (`PeopleFilterSpec`) працює через той самий репозиторій | ✅ `/api/people?...` |
+
+### Знімки екрана (Лаб. 03)
+
+Aspire Dashboard — `catalog-api` і `CatalogDb` у статусі Running:
+
+![Aspire Dashboard](docs/screenshots/lab03-aspire-dashboard.jpg)
+
+Swagger Catalog API:
+
+![Swagger](docs/screenshots/lab03-swagger.jpg)
+
+Відповідь з пагінацією (`page=2&pageSize=2`):
+
+![Пагінація](docs/screenshots/lab03-pagination.jpg)
+
+400 з помилками валідації (DataAnnotations і FluentValidation):
+
+![Валідація](docs/screenshots/lab03-validation-400.jpg)
