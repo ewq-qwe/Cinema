@@ -1,0 +1,10 @@
+# Лаб. 04 — лог LoggingBehavior / PerformanceBehavior (Serilog, logs/reviews-*.json)
+# demo-rating-10: команда з Rating = 10 → 400, обробник НЕ викликався (немає рядка PerformanceBehavior).
+# demo-valid:     коректна команда → обробник виконано (є рядок PerformanceBehavior) → 201.
+
+16:43:10.433 Warning     [demo-rating-10] You do not have a valid license key for the Lucky Penny software MediatR. This is allowed for development and testing scenarios. If you are running in production you are required to have a licensed version. Please visit https://luckypennysoftware.com to obtain a valid license.
+16:43:10.494 Information [demo-rating-10] MediatR → CreateReviewCommand {"MovieId": 1, "MovieTitle": "Карпатський експрес", "AuthorId": 7, "AuthorName": "Марія", "Kind": "full", "Rating": 10, "Title": null, "Text": "Супер", "HasSpoilers": false, "Photos": null, "Publication": null, "Pros": null, "Cons": null, "$type": "CreateReviewCommand"}
+16:43:10.702 Warning     [demo-rating-10] MediatR ✗ CreateReviewCommand відхилено валідацією — обробник НЕ викликався. Помилки: [{"PropertyName": "Rating", "ErrorMessage": "'Rating' має бути між 1 та 5 (включно). Ви ввели 10."}]
+16:43:10.819 Information [demo-valid] MediatR → CreateReviewCommand {"MovieId": 1, "MovieTitle": "Карпатський експрес", "AuthorId": 7, "AuthorName": "Марія", "Kind": "full", "Rating": 5, "Title": null, "Text": "Супер", "HasSpoilers": false, "Photos": null, "Publication": null, "Pros": null, "Cons": null, "$type": "CreateReviewCommand"}
+16:43:10.854 Debug       [demo-valid] Обробник CreateReviewCommand виконано за 13 мс
+16:43:10.855 Information [demo-valid] MediatR ← CreateReviewCommand оброблено за 35 мс

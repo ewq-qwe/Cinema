@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Infrastructure реалізує інтерфейси, оголошені в Application і Domain -->
+  <ItemGroup>
+    <ProjectReference Include="..\Reviews.Application\Reviews.Application.csproj" />
+    <ProjectReference Include="..\Reviews.Domain\Reviews.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.14" />
+    <PackageReference Include="MongoDB.Bson" Version="3.13.0" />
+    <PackageReference Include="MongoDB.Driver" Version="3.13.0" />
+  </ItemGroup>
+
+  <!-- Seed-дані — приклади документів з Лаб. 01 (mongoexport, Extended JSON). Посилання на файли, а не копії. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\..\docs\samples\reviews.json" LogicalName="Seed.reviews.json" />
+    <EmbeddedResource Include="..\..\..\docs\samples\discussions.json" LogicalName="Seed.discussions.json" />
+    <EmbeddedResource Include="..\..\..\docs\samples\messages.json" LogicalName="Seed.messages.json" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

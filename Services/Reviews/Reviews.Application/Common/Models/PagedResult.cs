@@ -1,0 +1,15 @@
+namespace Reviews.Application.Common.Models;
+
+/// <summary>Сторінка результатів зі skip/limit і загальною кількістю документів.</summary>
+public sealed record PagedResult<T>(IReadOnlyList<T> Items, long TotalCount, int Page, int PageSize)
+{
+    public int TotalPages => PageSize == 0 ? 0 : (int)Math.Ceiling(TotalCount / (double)PageSize);
+    public bool HasPrevious => Page > 1;
+    public bool HasNext => Page < TotalPages;
+}
+
+/// <summary>
+/// Курсорна сторінка: наступна починається після останнього отриманого документа (<see cref="NextCursor"/> = його ObjectId),
+/// тож швидкість не падає зі зростанням номера сторінки, як у skip.
+/// </summary>
+public sealed record CursorPage<T>(IReadOnlyList<T> Items, string? NextCursor, bool HasMore);
