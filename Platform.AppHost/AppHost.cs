@@ -1,5 +1,5 @@
 // Оркестрація .NET Aspire: одна команда піднімає SQL Server у контейнері, створює БД CinemaBooking
-// зі скриптів Лаб. 01 (db/p1) і запускає Booking.Api з переданим рядком підключення.
+// зі скриптів Лаб. 01 (db/p1) і CinemaCatalog (міграції EF Core), запускає Booking.Api і Catalog.Api.
 //   dotnet run --project Platform.AppHost
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -21,6 +21,15 @@ var bookingDb = sql.AddDatabase("BookingDb", databaseName: "CinemaBooking")
 builder.AddProject<Projects.Booking_Api>("booking-api")
        .WithReference(bookingDb)
        .WaitFor(bookingDb)
+       .WithUrlForEndpoint("http", url => url.Url = "/swagger");
+
+// Каталог (Лаб. 03, EF Core): порожня БД, схему створюють міграції, дані — сідінг (обидва — на старті Catalog.Api).
+// Ресурс "CatalogDb" = ім'я рядка підключення в appsettings.json Catalog.Api.
+var catalogDb = sql.AddDatabase("CatalogDb", databaseName: "CinemaCatalog");
+
+builder.AddProject<Projects.Catalog_Api>("catalog-api")
+       .WithReference(catalogDb)
+       .WaitFor(catalogDb)
        .WithUrlForEndpoint("http", url => url.Url = "/swagger");
 
 builder.Build().Run();

@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Services\Booking\Booking.Api\Booking.Api.csproj" />
+    <ProjectReference Include="..\Services\Catalog\Catalog.Api\Catalog.Api.csproj" />
   </ItemGroup>
 
 </Project>
