@@ -2,6 +2,13 @@
 
 Скрипти: [`db/p3`](../db/p3). Приклади документів у JSON (Extended JSON, вивантажено `mongoexport`): [`docs/samples`](samples).
 
+**Лаб. 04 — реалізація:** мікросервіс [`Services/Reviews`](../Services/Reviews) (Clean Architecture, CQRS + MediatR) працює саме з цими колекціями `reviews`, `discussions`, `messages`:
+- структура документів та сама: BsonClassMap у `Reviews.Infrastructure/Persistence/MongoMappings.cs`;
+- імена індексів збігаються з `collections.js`;
+- сід-дані — файли `docs/samples/*.json`.
+
+Додано текстовий індекс `tx_reviews_text` (пошук) та `ix_messages_discussion_cursor` (курсорна пагінація), а також поле `version` для оптимістичної конкурентності. Колекція `movieRatings` лишається read model з Лаб. 01; API рахує рейтинг агрегацією на льоту (`GET /api/movies/{movieId}/rating`).
+
 ## Колекції (4)
 
 | Колекція | Що зберігає | Прийом моделювання |

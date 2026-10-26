@@ -2,7 +2,8 @@
 
 * **Лаб. 01** — три бази даних для мікросервісів (розділи нижче, від «Що де лежить»).
 * **Лаб. 02** — мікросервіс «Бронювання» як вертикаль DAL → BLL → API на ADO.NET + Dapper із запуском через .NET Aspire: розділ «Лаб. 02».
-* **Лаб. 03** — мікросервіс «Каталог» на EF Core: Code-First, Fluent API, міграції, Repository / Unit of Work, специфікації, FluentValidation, Serilog: розділ «Лаб. 03» в кінці файлу.
+* **Лаб. 03** — мікросервіс «Каталог» на EF Core: Code-First, Fluent API, міграції, Repository / Unit of Work, специфікації, FluentValidation, Serilog: розділ «Лаб. 03».
+* **Лаб. 04** — мікросервіс «Відгуки» на MongoDB за Clean Architecture: CQRS + MediatR, Value Objects, Pipeline Behaviors, BsonClassMap, індекси й сідінг: розділ «Лаб. 04» в кінці файлу.
 
 **Домен.** Кінотеатр «Кадр» (вигаданий, 2 зали) продає квитки онлайн. Глядачі дивляться афішу, бронюють і оплачують місця на сеанс, а після перегляду пишуть відгуки й обговорюють фільми. Адміністратор веде каталог фільмів і розклад.
 
@@ -40,6 +41,7 @@ Platform.slnx              одне рішення на всю платформ�
 Platform.AppHost/          оркестрація .NET Aspire (AppHost.cs)
 Services/Booking/          мікросервіс «Бронювання» (Проєкт №1, Лаб. 02): Booking.Api · Booking.Bll · Booking.Dal · Booking.Domain · Booking.Tests
 Services/Catalog/          мікросервіс «Каталог» (Проєкт №2, Лаб. 03): Catalog.Api (+ Dockerfile) · Catalog.Bll · Catalog.Dal · Catalog.Domain · Catalog.Tests
+Services/Reviews/          мікросервіс «Відгуки» (Проєкт №3, Лаб. 04): Reviews.Domain · Reviews.Application · Reviews.Infrastructure · Reviews.WebApi · Reviews.Tests
 ```
 
 | Артефакт | Файл |
@@ -507,3 +509,160 @@ Swagger Catalog API:
 400 з помилками валідації (DataAnnotations і FluentValidation):
 
 ![Валідація](docs/screenshots/lab03-validation-400.jpg)
+
+## Лаб. 04 — мікросервіс Reviews (Clean Architecture, CQRS + MediatR, MongoDB)
+
+Мікросервіс «Відгуки та обговорення» (Проєкт №3 з Лаб. 01, база `cinema_reviews`). На відміну від тришарової вертикалі Лаб. 02–03, тут доменний шар нічого не знає ні про API, ні про базу даних.
+
+### Схема шарів
+
+```mermaid
+flowchart LR
+    W["Reviews.WebApi<br/>контролери (ISender), ProblemDetails,<br/>Swagger, Serilog, DI"]
+    A["Reviews.Application<br/>Commands / Queries + обробники,<br/>Behaviors, валідатори, DTO, IReviewQueries"]
+    I["Reviews.Infrastructure<br/>MongoDbContext, BsonClassMap,<br/>репозиторії, запити, індекси, сідінг"]
+    D["Reviews.Domain<br/>BaseEntity, ValueObject, сутності,<br/>Value Objects, IReviewRepository"]
+    W --> A
+    W -. "лише реєстрація DI" .-> I
+    I --> A
+    I --> D
+    A --> D
+```
+
+**Правило залежностей:** стрілки ведуть лише всередину. `Reviews.Domain` не посилається на жоден проєкт, з пакетів має лише `MongoDB.Bson` (тип `ObjectId`), драйвера `MongoDB.Driver` у ньому немає. Infrastructure реалізує інтерфейси, оголошені всередині: `IReviewRepository` / `IDiscussionRepository` / `IMessageRepository` у Domain, `IReviewQueries` / `IDiscussionQueries` в Application.
+
+| Проєкт | Вміст |
+|---|---|
+| `Reviews.Domain` | `Common/BaseEntity` (`Id: ObjectId`, `CreatedAt`, `UpdatedAt`, `Version`), `Common/ValueObject` (`GetEqualityComponents`). Сутності `Review` (вкладений масив `comments[]`, гнучка схема за `kind`: quick / full / critic), `Comment`, `Discussion` (вкладені `lastMessages[]` ≤ 3), `Message`. Value Objects `Author`, `Rating`, `DiscussionStats`, `MessagePreview`. `DomainException`, `NotFoundException`, `ConflictException`. Інтерфейси репозиторіїв |
+| `Reviews.Application` | `Common/Messaging` (`ICommand`, `ICommand<T>`, `IQuery<T>`), `Common/Behaviors` (Logging → Validation → Performance), `Common/Interfaces` (`IReviewQueries`, `IDiscussionQueries`), `Common/Models` (DTO, `PagedResult<T>`, `CursorPage<T>`), профілі AutoMapper. Фічі: `Reviews/Commands` (Create / Update / Delete / AddComment), `Reviews/Queries` (GetById / GetList), `Movies/Queries/GetMovieRating`, `Discussions/Commands` (CreateDiscussion / PostMessage), `Discussions/Queries`. `DependencyInjection.AddApplication()` |
+| `Reviews.Infrastructure` | `Persistence/`: `MongoDbOptions`, `MongoDbContext`, `MongoMappings` (BsonClassMap + конвенції), `Serializers/` (`RatingSerializer`, `LowercaseEnumSerializer`), `Repositories/`, `Queries/`. `Seeding/`: `IDataSeeder` + сідери, `IndexCreationService`. `DependencyInjection.AddInfrastructure()` |
+| `Reviews.WebApi` | `ReviewsController`, `DiscussionsController`, `MoviesController` (лише `ISender` + AutoMapper для тіл запитів), `ExceptionToProblemDetailsHandler`, `CorrelationIdMiddleware`, `appsettings.{Environment}.json`, health check `/health` |
+| `Reviews.Tests` | 29 тестів: правила домену без БД, реальний pipeline MediatR із підмінними репозиторіями, BSON-мапінг без сервера, AutoMapper |
+
+### Запуск
+
+**Через Aspire (рекомендовано).** Піднімає SQL Server, MongoDB і всі три API:
+
+```bash
+dotnet run --project Platform.AppHost
+```
+
+`reviews-api` отримує порожню БД `cinema_reviews` (рядок підключення `ConnectionStrings__ReviewsDb` від Aspire). На старті він сам створює індекси (`IndexCreationService`) і засіває колекції (`DataSeedingService`). Swagger: http://localhost:5136/swagger. Dashboard: http://localhost:15180.
+
+**Окремо, проти MongoDB з docker compose:**
+
+```bash
+docker compose up -d mongo
+```
+
+```bash
+dotnet run --project Services/Reviews/Reviews.WebApi
+```
+
+Налаштування — секція `MongoDb` в `appsettings.json`: `ConnectionString` (з `maxPoolSize`, `serverSelectionTimeoutMS`), `DatabaseName`, `CreateIndexesOnStartup`, `SeedOnStartup`. Окремі значення задано в `appsettings.Development.json`, `appsettings.Staging.json` і `appsettings.Production.json` (у Production сідінг вимкнено, рядок підключення — зі змінної `MongoDb__ConnectionString`). Ключ Lucky Penny для MediatR / AutoMapper — `LuckyPenny__LicenseKey`. Без ключа працює Community-режим: у лозі лише попередження.
+
+### CQRS і pipeline MediatR
+
+Кожна операція API — окрема команда чи запит з окремим обробником. Контролери викликають тільки `ISender`. Обробники команд працюють через інтерфейси репозиторіїв, обробники запитів — через `IReviewQueries` / `IDiscussionQueries`. Ні контролери, ні Application не звертаються до `IMongoCollection`.
+
+| Операція | Тип | Повертає |
+|---|---|---|
+| `CreateReviewCommand` · `CreateDiscussionCommand` | команда | Id (рядок ObjectId) |
+| `UpdateReviewCommand` (версія з `If-Match`) · `AddCommentCommand` · `PostMessageCommand` | команда | DTO |
+| `DeleteReviewCommand` | команда | — |
+| `GetReviewByIdQuery` · `GetReviewsListQuery` · `GetMovieRatingQuery` | запит | DTO / `PagedResult` |
+| `GetDiscussionByIdQuery` · `GetDiscussionsListQuery` · `GetDiscussionMessagesQuery` | запит | DTO / `PagedResult` / `CursorPage` |
+
+Порядок behaviors задано в `AddApplication()` через `AddOpenBehavior`:
+
+1. **LoggingBehavior** — зовнішній. Структуровано логує запит, результат і час. Якщо запит відхилено валідацією, пише «обробник НЕ викликався».
+2. **ValidationBehavior** — запускає всі валідатори FluentValidation (разом з асинхронними), збирає всі помилки й кидає `ValidationException` до виклику обробника.
+3. **PerformanceBehavior** — найближчий до обробника. Міряє час обробника разом із запитами до MongoDB; понад 500 мс пише Warning.
+
+MongoDB-специфічні правила валідаторів:
+- кожен Id перевіряється як ObjectId (`MustBeObjectId`);
+- **асинхронне правило із запитом до MongoDB:** глядач ще не залишав відгук на цей фільм (`IReviewRepository.ExistsAsync`);
+- **ще одне асинхронне правило:** `replyTo` існує в цьому ж обговоренні.
+
+### MongoDB: мапінг, репозиторії, індекси, сідінг
+
+- **BsonClassMap** (`MongoMappings.Register()`, один раз на старті). Доменні класи не мають BSON-атрибутів. Мапінг налаштовує:
+  - конвенції camelCase, `IgnoreExtraElements` (гнучка схема) й `IgnoreIfNull`;
+  - приватні поля `_comments`, `_tags`, `_lastMessages` → `comments`, `tags`, `lastMessages`;
+  - створення Value Objects через конструктор (`MapCreator`), тож некоректні дані з БД теж не пройдуть;
+  - `Rating` ↔ число, `ReviewKind` ↔ `"full"`;
+  - дати в UTC.
+
+  Документи мають структуру з Лаб. 01, тому сід-дані — це ті самі файли [`docs/samples/*.json`](docs/samples), підключені як ресурси, без копій.
+- **Оптимістична конкурентність.** `ReplaceOne` має фільтр `{ _id, version: очікувана }` і пише `version + 1`. `MatchedCount = 0` → `ConflictException` → 409. Документи зі скриптів Лаб. 01 без поля `version` вважаються версією 0. API віддає версію в `ETag`; `PUT` вимагає `If-Match` (без нього — 428).
+- **Читання.** `$project` одразу у форму DTO: `author.displayName` → `authorName`, `$size` коментарів. Список відгуків — один aggregation pipeline `$match` (+ `$text`) → `$facet { items: $sort/$skip/$limit/$project, total: $count }`. Рейтинг фільму — `$match` → `$group`. Повідомлення теми — **курсорна пагінація** (`_id > after`, `limit + 1`).
+- **Індекси** (`IndexCreationService`, імена збігаються з `db/p3/collections.js`, тому повторне створення нічого не дублює):
+  - `ix_reviews_movie_recent` `{movieId, createdAt}`;
+  - `ix_reviews_author` `{author.customerId, createdAt}`;
+  - **unique** `ux_reviews_movie_author` `{movieId, author.customerId}`;
+  - **text** `tx_reviews_text` `{title, text}`;
+  - `ix_discussions_movie`;
+  - `ix_messages_discussion`;
+  - `ix_messages_discussion_cursor` `{discussionId, _id}`.
+- **Сідінг.** `IDataSeeder` на кожну колекцію (`ReviewSeeder`, `DiscussionSeeder`, `MessageSeeder`): `InsertManyAsync`, лише якщо колекція порожня.
+- **Health check.** `/health` перевіряє з'єднання з MongoDB (`AspNetCore.HealthChecks.MongoDb`).
+
+### Ендпоінти
+
+| Метод | Шлях | Статуси |
+|---|---|---|
+| GET | `/api/reviews?movieId=&authorId=&kind=&minRating=&search=&sortBy=newest\|oldest\|rating\|likes&page=&pageSize=` | 200, 400 |
+| GET | `/api/reviews/{id}` (+ `ETag`) | 200, 400 (не ObjectId), 404 |
+| POST | `/api/reviews` | 201 + `Location: /api/reviews/{ObjectId}`, 400, 409 (унікальний індекс) |
+| PUT | `/api/reviews/{id}` + `If-Match: "N"` | 200, 400, 404, 409 (версія), 428 (без If-Match) |
+| DELETE | `/api/reviews/{id}` (+ необов'язковий `If-Match`) | 204, 400, 404, 409 |
+| POST | `/api/reviews/{id}/comments` | 201, 400 (напр. коментар до quick-відгуку), 404, 409 |
+| GET | `/api/movies/{movieId}/rating` | 200, 404 |
+| GET · POST | `/api/discussions?movieId=&page=&pageSize=` · `/api/discussions` | 200 / 201, 400 |
+| GET | `/api/discussions/{id}` | 200, 400, 404 |
+| GET · POST | `/api/discussions/{id}/messages?after=&limit=` (курсор) | 200 / 201, 400, 404 |
+
+### Обробка помилок
+
+`ExceptionToProblemDetailsHandler` (`IExceptionHandler` + `AddProblemDetails`) перетворює винятки на ProblemDetails. Кожен виняток логується один раз:
+
+| Виняток | HTTP |
+|---|---|
+| `NotFoundException` | 404 |
+| `ValidationException` (FluentValidation, з pipeline) | 400, помилки по полях |
+| `DomainException` | 400 |
+| `ConflictException` (конфлікт версій) | 409 |
+| `MongoWriteException` / `MongoBulkWriteException` з `DuplicateKey` | 409 (з назвою індексу) |
+| інші `MongoWriteException` | 400 |
+| `MongoConnectionException`, таймаут вибору сервера | 503 + `Retry-After` |
+| решта | 500 (деталі лише в Development) |
+
+### Тести
+
+```bash
+dotnet test --project Services/Reviews/Reviews.Tests
+```
+
+### Самоперевірка з умови
+
+| Перевірка | Результат |
+|---|---|
+| `Reviews.Domain` не має посилань на інші проєкти рішення | ✅ [`Reviews.Domain.csproj`](Services/Reviews/Reviews.Domain/Reviews.Domain.csproj): лише `MongoDB.Bson` |
+| жоден контролер і обробник не звертається до `IMongoCollection` | ✅ `IMongoCollection` є лише в `Reviews.Infrastructure` |
+| unit-тест: `Review` з Rating = 10 → `DomainException` без БД | ✅ `DomainTests` |
+| команда з Rating = 10 → 400 до виклику обробника | ✅ [`lab04-validation-before-handler.log`](docs/screenshots/lab04-validation-before-handler.log): є «обробник НЕ викликався», рядка PerformanceBehavior немає |
+| `db.reviews.find()` без приватних полів .NET; `getIndexes()` показує індекси | ✅ [`lab04-mongo-reviews.txt`](docs/screenshots/lab04-mongo-reviews.txt) |
+| повторний відгук того самого глядача на той самий фільм відхиляється | ✅ 400 від асинхронного валідатора; при одночасних запитах — 409 «Дублікат» від унікального індексу (20 паралельних POST: 1 × 201, решта 400 / 409, жодного 500) |
+| конфлікт версій | ✅ `PUT` зі старим `If-Match` → 409 |
+| повторний запуск не дублює seed-дані | ✅ у лозі «Сідінг reviews: колекція вже містить дані — пропущено», кількості 6 / 2 / 4 незмінні |
+| MongoDB вимкнена | ✅ 503 + `Retry-After`, `/health` → Unhealthy |
+
+### Знімки екрана (Лаб. 04)
+
+Aspire Dashboard — `mongo`, `ReviewsDb` і `reviews-api` у статусі Running:
+
+![Aspire Dashboard](docs/screenshots/lab04-aspire-dashboard.jpg)
+
+Swagger Reviews API:
+
+![Swagger](docs/screenshots/lab04-swagger.jpg)

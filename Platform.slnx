@@ -14,5 +14,12 @@
     <Project Path="Services/Catalog/Catalog.Domain/Catalog.Domain.csproj" />
     <Project Path="Services/Catalog/Catalog.Tests/Catalog.Tests.csproj" />
   </Folder>
+  <Folder Name="/Services/Reviews/">
+    <Project Path="Services/Reviews/Reviews.Application/Reviews.Application.csproj" />
+    <Project Path="Services/Reviews/Reviews.Domain/Reviews.Domain.csproj" />
+    <Project Path="Services/Reviews/Reviews.Infrastructure/Reviews.Infrastructure.csproj" />
+    <Project Path="Services/Reviews/Reviews.Tests/Reviews.Tests.csproj" />
+    <Project Path="Services/Reviews/Reviews.WebApi/Reviews.WebApi.csproj" />
+  </Folder>
   <Project Path="Platform.AppHost/Platform.AppHost.csproj" />
 </Solution>

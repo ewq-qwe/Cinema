@@ -1,0 +1,86 @@
+// Лаб. 04 — MongoDB cinema_reviews після старту Reviews.WebApi під Aspire (порожня БД → індекси + сідінг)
+// mongosh cinema_reviews
+
+> db.reviews.find({ _id: ObjectId('670000000000000000000001') })  // документ із сід-даних (структура Лаб. 01)
+[
+  {
+    _id: ObjectId('670000000000000000000001'),
+    createdAt: ISODate('2026-10-02T18:30:00.000Z'),
+    version: 0,
+    movieId: 1,
+    movieTitle: 'Карпатський експрес',
+    author: { customerId: 1, displayName: 'Олена К.' },
+    kind: 'full',
+    rating: 5,
+    title: 'Найкращий фільм осені!',
+    text: 'Неймовірні краєвиди Карпат і закручений сюжет. Рекомендую всім.',
+    hasSpoilers: false,
+    discussionId: ObjectId('670000000000000000000d01'),
+    likes: 14,
+    comments: [
+      {
+        author: 'Тарас М.',
+        text: 'Згоден, фінал — вогонь!',
+        createdAt: ISODate('2026-10-02T19:10:00.000Z')
+      },
+      {
+        author: 'Ірина Б.',
+        text: 'Треба й собі сходити',
+        createdAt: ISODate('2026-10-03T08:45:00.000Z')
+      }
+    ],
+    photos: [ 'https://cdn.cinema-kadr.example/reviews/r1-1.jpg' ]
+  }
+]
+
+> db.reviews.find({ 'author.customerId': 7 })  // створено через POST /api/reviews: camelCase, вкладений author, version
+[
+  {
+    _id: ObjectId('6adf831e1543bd95cbf5c9d6'),
+    createdAt: ISODate('2026-10-26T16:43:10.843Z'),
+    version: 0,
+    movieId: 1,
+    movieTitle: 'Карпатський експрес',
+    author: { customerId: 7, displayName: 'Марія' },
+    kind: 'full',
+    rating: 5,
+    text: 'Супер',
+    hasSpoilers: false,
+    likes: 0,
+    comments: []
+  }
+]
+
+> db.reviews.getIndexes()
+[
+  { v: 2, key: { _id: 1 }, name: '_id_' },
+  {
+    v: 2,
+    key: { movieId: 1, createdAt: -1 },
+    name: 'ix_reviews_movie_recent'
+  },
+  {
+    v: 2,
+    key: { 'author.customerId': 1, createdAt: -1 },
+    name: 'ix_reviews_author'
+  },
+  {
+    v: 2,
+    key: { movieId: 1, 'author.customerId': 1 },
+    name: 'ux_reviews_movie_author',
+    unique: true
+  },
+  {
+    v: 2,
+    key: { _fts: 'text', _ftsx: 1 },
+    name: 'tx_reviews_text',
+    weights: { text: 1, title: 1 },
+    default_language: 'none',
+    language_override: 'language',
+    textIndexVersion: 3
+  }
+]
+
+> db.discussions.getIndexes().map(i => i.name); db.messages.getIndexes().map(i => i.name)
+[ '_id_', 'ix_discussions_movie' ]
+[ '_id_', 'ix_messages_discussion', 'ix_messages_discussion_cursor' ]

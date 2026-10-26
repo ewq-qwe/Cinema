@@ -1,5 +1,6 @@
 // Оркестрація .NET Aspire: одна команда піднімає SQL Server у контейнері, створює БД CinemaBooking
-// зі скриптів Лаб. 01 (db/p1) і CinemaCatalog (міграції EF Core), запускає Booking.Api і Catalog.Api.
+// зі скриптів Лаб. 01 (db/p1) і CinemaCatalog (міграції EF Core), MongoDB для відгуків;
+// запускає Booking.Api, Catalog.Api і Reviews.WebApi.
 //   dotnet run --project Platform.AppHost
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -30,6 +31,16 @@ var catalogDb = sql.AddDatabase("CatalogDb", databaseName: "CinemaCatalog");
 builder.AddProject<Projects.Catalog_Api>("catalog-api")
        .WithReference(catalogDb)
        .WaitFor(catalogDb)
+       .WithUrlForEndpoint("http", url => url.Url = "/swagger");
+
+// Відгуки (Лаб. 04, Clean Architecture + MongoDB): порожня БД cinema_reviews; індекси й тестові дані
+// створює сам Reviews.WebApi на старті. Ресурс "ReviewsDb" → ConnectionStrings__ReviewsDb.
+var mongo = builder.AddMongoDB("mongo");
+var reviewsDb = mongo.AddDatabase("ReviewsDb", databaseName: "cinema_reviews");
+
+builder.AddProject<Projects.Reviews_WebApi>("reviews-api")
+       .WithReference(reviewsDb)
+       .WaitFor(reviewsDb)
        .WithUrlForEndpoint("http", url => url.Url = "/swagger");
 
 builder.Build().Run();
