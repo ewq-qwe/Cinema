@@ -11,8 +11,7 @@ services:
       - "1433:1433"
     volumes:
       - sqldata:/var/opt/mssql
-      - ./src/Booking/db:/scripts/booking:ro
-      - ./src/Catalog/db:/scripts/catalog:ro
+      - ./db:/scripts:ro
     healthcheck:
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -C -Q 'SELECT 1' || exit 1"]
       interval: 10s
@@ -25,7 +24,7 @@ services:
       - "27017:27017"
     volumes:
       - mongodata:/data/db
-      - ./src/Reviews/db:/scripts:ro
+      - ./db:/scripts:ro
 
 volumes:
   sqldata:

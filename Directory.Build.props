@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Не генерувати нативний .exe-запускач: застосунки стартують через підписаний dotnet.exe.
+         На Windows з увімкненим Smart App Control непідписаний .exe блокується політикою. -->
+    <UseAppHost>false</UseAppHost>
+  </PropertyGroup>
+</Project>

@@ -36,6 +36,7 @@ public class CatalogDbContext(DbContextOptions<CatalogDbContext> options) : DbCo
 
             e.Property(x => x.Title).HasMaxLength(200).IsRequired();
             e.Property(x => x.AgeRating).HasMaxLength(5).IsUnicode(false).HasDefaultValue("0+");
+            e.Property(x => x.IsDeleted).HasDefaultValue(false);
             e.Property(x => x.RowVersion).IsRowVersion();
             ConfigureAudit(e);
 

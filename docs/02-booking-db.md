@@ -1,6 +1,6 @@
 # 2. Проєкт №1 — CinemaBooking (SQL Server + ADO.NET & Dapper)
 
-Скрипти: [`src/Booking/db`](../src/Booking/db). ERD для dbdiagram.io: [`docs/erd/booking.dbml`](erd/booking.dbml).
+Скрипти: [`db/p1`](../db/p1). ERD для dbdiagram.io: [`docs/erd/booking.dbml`](erd/booking.dbml).
 
 ## ERD
 
@@ -94,16 +94,18 @@ erDiagram
 | `UX_Tickets_SessionSeat_Active` (SessionId, SeatId) WHERE IsCancelled = 0 | **не продати одне місце двічі**; скасовані квитки місце не займають |
 | UNIQUE `(HallId, RowNumber, SeatNumber)`, `(HallId, StartsAt)` | цілісність довідників + пошук місця / сеансу |
 
-## Збережувані процедури (6)
+## Збережувані процедури (6) — [`db/p1/procedures.sql`](../db/p1/procedures.sql)
 
 | # | Процедура | Тип | Що робить |
 |---|---|---|---|
-| 1 | `usp_Booking_Create` | бізнес, транзакція | перевіряє сеанс (ще не почався), місця (належать залу, вільні — `UPDLOCK, HOLDLOCK`), рахує ціну (VIP × 1.5), створює бронювання й квитки |
-| 2 | `usp_Booking_Pay` | бізнес, транзакція | `Created → Paid`, перевіряє суму, створює запис 1:1 в `BookingPayments` |
-| 3 | `usp_Booking_ChangeStatus` | бізнес, транзакція | `Paid → Used`, `Created/Paid → Cancelled`; **недопустимий перехід → `THROW 50002`**; опційно перевіряє `RowVersion` |
-| 4 | `usp_Booking_GetById` | READ | картка бронювання + квитки |
-| 5 | `usp_Bookings_GetPage` | READ, пошук | фільтри + пагінація `OFFSET/FETCH` |
-| 6 | `usp_Session_GetSeatMap` | READ | схема залу: вільні/зайняті місця |
+| 1 | `usp_Customer_Save` | CRUD: create / update | `@Id = NULL` створює глядача; інакше оновлює з перевіркою `RowVersion` (`50006` при конфлікті) |
+| 2 | `usp_Customer_Delete` | CRUD: delete (м'яке) | `IsDeleted = 1`; відмовляє (`50007`), якщо є активні бронювання |
+| 3 | `usp_Booking_Create` | бізнес, транзакція | перевіряє сеанс (ще не почався), місця (належать залу, вільні — `UPDLOCK, HOLDLOCK`), рахує ціну (VIP × 1.5), створює бронювання й квитки |
+| 4 | `usp_Booking_Pay` | бізнес, транзакція | `Created → Paid`, перевіряє суму, створює запис 1:1 в `BookingPayments` |
+| 5 | `usp_Booking_ChangeStatus` | бізнес, транзакція | `Paid → Used`, `Created/Paid → Cancelled`; **недопустимий перехід → `THROW 50002`**; опційно перевіряє `RowVersion` |
+| 6 | `usp_Booking_GetById` | CRUD: read | картка бронювання + квитки (2 набори результатів) |
+
+Пошук, пагінація, розклад і схема залу — звичайні запити в [`db/p1/queries.sql`](../db/p1/queries.sql).
 
 Шаблон транзакційних процедур: `SET XACT_ABORT ON` → `BEGIN TRY / BEGIN TRANSACTION` → перевірки з `THROW 50xxx` → зміни → `COMMIT`; у `CATCH`: `ROLLBACK` + `THROW`.
 
@@ -113,6 +115,6 @@ erDiagram
 * **RowVersion** у Customers і Bookings. Глядача може одночасно редагувати він сам і адміністратор, бронювання — касир і контролер. Без RowVersion пізніший запис тихо затер би зміни попереднього.
 * Короткі песимістичні блокування (`UPDLOCK`) у процедурах захищають від продажу одного місця двом глядачам.
 
-## Права (`005_security.sql`)
+## Права (`db/p1/security.sql`)
 
 Логін `booking_app` має користувача **лише в CinemaBooking**. Роль `booking_service` дає: `EXECUTE` процедур, CRUD (без DELETE) глядачів, читання довідників. Пряма зміна `BookingPayments` заборонена (`DENY`).
