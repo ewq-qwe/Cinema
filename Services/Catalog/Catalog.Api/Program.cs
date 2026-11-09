@@ -1,6 +1,5 @@
 using System.Reflection;
 using Catalog.Api.Errors;
-using Catalog.Api.Logging;
 using Catalog.Bll.Mapping;
 using Catalog.Bll.Services;
 using Catalog.Bll.Validators;
@@ -10,17 +9,13 @@ using Catalog.Dal.Seeding;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Serilog;
-using Serilog.Events;
+using Platform.ServiceDefaults.Correlation;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ---------- Serilog: налаштування — розділ "Serilog" в appsettings.json (sinks: Console + File) ----------
-builder.Host.UseSerilog((ctx, cfg) => cfg
-    .ReadFrom.Configuration(ctx.Configuration)
-    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Information) // SQL-запити EF Core
-    .Enrich.FromLogContext()
-    .Enrich.WithProperty("Application", "Catalog.Api"));
+// ---------- Лаб. 05: спільні налаштування платформи — Serilog, OpenTelemetry, health checks, service discovery ----------
+// Рівень логів SQL-запитів EF Core перевизначено в appsettings.json (Serilog:MinimumLevel:Override)
+builder.AddServiceDefaults();
 
 // ---------- EF Core: DbContext у Catalog.Dal, рядок підключення "CatalogDb" — тут (Aspire перевизначає його) ----------
 var connectionString = builder.Configuration.GetConnectionString("CatalogDb")
@@ -83,9 +78,7 @@ await using (var scope = app.Services.CreateAsyncScope())
 }
 
 // ---------- Конвеєр ----------
-app.UseMiddleware<CorrelationIdMiddleware>();          // CorrelationId / RequestPath / UserId у всіх логах запиту
-app.UseSerilogRequestLogging(o => o.EnrichDiagnosticContext = (diag, http) =>
-    diag.Set("ClientIp", http.Connection.RemoteIpAddress?.ToString()));
+app.UseMiddleware<CorrelationIdMiddleware>();          // CorrelationId у всіх логах запиту + межі запиту (ServiceDefaults)
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
@@ -96,6 +89,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapDefaultEndpoints();   // /health і /alive
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();

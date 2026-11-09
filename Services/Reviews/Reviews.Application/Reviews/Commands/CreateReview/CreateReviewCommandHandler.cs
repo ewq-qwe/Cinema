@@ -1,4 +1,6 @@
 using MediatR;
+using Microsoft.Extensions.Logging;
+using Reviews.Application.Common.Diagnostics;
 using Reviews.Application.Common.Validation;
 using Reviews.Domain.Entities;
 using Reviews.Domain.Interfaces;
@@ -6,10 +8,15 @@ using Reviews.Domain.ValueObjects;
 
 namespace Reviews.Application.Reviews.Commands.CreateReview;
 
-public sealed class CreateReviewCommandHandler(IReviewRepository reviews) : IRequestHandler<CreateReviewCommand, string>
+public sealed class CreateReviewCommandHandler(IReviewRepository reviews, ILogger<CreateReviewCommandHandler> logger)
+    : IRequestHandler<CreateReviewCommand, string>
 {
     public async Task<string> Handle(CreateReviewCommand cmd, CancellationToken ct)
     {
+        using var activity = ReviewsTelemetry.Source.StartActivity("review.create");
+        activity?.SetTag("movie.id", cmd.MovieId);
+        activity?.SetTag("review.kind", cmd.Kind);
+
         var review = new Review(
             cmd.MovieId, cmd.MovieTitle,
             new Author(cmd.AuthorId, cmd.AuthorName),
@@ -19,6 +26,10 @@ public sealed class CreateReviewCommandHandler(IReviewRepository reviews) : IReq
 
         // Гонку двох однакових запитів зупинить унікальний індекс (movieId, author.customerId) → 409
         await reviews.AddAsync(review, ct);
+
+        activity?.SetTag("review.id", review.Id.ToString());
+        logger.LogInformation("Створено відгук {ReviewId} на фільм {MovieId}: вид {Kind}, оцінка {Rating}, глядач {CustomerId}",
+            review.Id.ToString(), review.MovieId, cmd.Kind, review.Rating.Value, review.Author.CustomerId);
         return review.Id.ToString();
     }
 }

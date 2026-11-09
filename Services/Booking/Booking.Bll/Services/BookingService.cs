@@ -1,5 +1,6 @@
 using System.Data;
 using AutoMapper;
+using Booking.Bll.Diagnostics;
 using Booking.Bll.Dtos;
 using Booking.Dal.Abstractions;
 using Booking.Domain;
@@ -38,6 +39,11 @@ public sealed class BookingService(IUnitOfWork uow, IMapper mapper, ILogger<Book
 
     public async Task<BookingDto> CreateAsync(CreateBookingDto input, CancellationToken ct = default)
     {
+        using var activity = BookingTelemetry.Source.StartActivity("booking.create");
+        activity?.SetTag("customer.id", input.CustomerId);
+        activity?.SetTag("session.id", input.SessionId);
+        activity?.SetTag("booking.seats", input.SeatIds.Count);
+
         var seatIds = input.SeatIds.Distinct().ToList();
         if (seatIds.Count != input.SeatIds.Count)
             throw new ValidationException("Місця в бронюванні не повинні повторюватися.",
@@ -98,13 +104,20 @@ public sealed class BookingService(IUnitOfWork uow, IMapper mapper, ILogger<Book
             throw;
         }
 
-        logger.LogInformation("Створено бронювання {BookingId} на сеанс {SessionId}, місць: {Seats}",
-            bookingId, input.SessionId, seatIds.Count);
-        return await GetAsync(bookingId, ct);
+        var created = await GetAsync(bookingId, ct);
+        activity?.SetTag("booking.id", bookingId);
+        activity?.SetTag("booking.status", created.Status);
+        logger.LogInformation("Створено бронювання {BookingId}: глядач {CustomerId}, сеанс {SessionId}, місць {SeatsCount}, сума {Amount}, статус {Status}",
+            bookingId, input.CustomerId, input.SessionId, seatIds.Count, created.TotalAmount, created.Status);
+        return created;
     }
 
     public async Task<BookingDto> PayAsync(long id, PayBookingDto input, CancellationToken ct = default)
     {
+        using var activity = BookingTelemetry.Source.StartActivity("booking.pay");
+        activity?.SetTag("booking.id", id);
+        activity?.SetTag("payment.method", input.Method);   // без TransactionId і реквізитів — це чутливі дані
+
         await uow.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         try
         {
@@ -150,24 +163,31 @@ public sealed class BookingService(IUnitOfWork uow, IMapper mapper, ILogger<Book
             throw;
         }
 
-        logger.LogInformation("Бронювання {BookingId} оплачено", id);
+        activity?.SetTag("booking.status", BookingStatuses.Paid);
+        logger.LogInformation("Бронювання {BookingId} оплачено: сума {Amount}, спосіб {PaymentMethod}, статус {Status}",
+            id, input.Amount, input.Method, BookingStatuses.Paid);
         return await GetAsync(id, ct);
     }
 
     public async Task<BookingDto> CancelAsync(long id, CancelBookingDto input, CancellationToken ct = default)
     {
+        using var activity = BookingTelemetry.Source.StartActivity("booking.cancel");
+        activity?.SetTag("booking.id", id);
         // Перевірку переходу й звільнення місць виконує процедура з Лаб. 01 в явній транзакції;
         // її керовані помилки (50001/50002/50003/50006) DAL перетворює на доменні винятки
         await uow.Bookings.ChangeStatusAsync(id, BookingStatuses.Cancelled, input.Reason,
             RowVersions.DecodeOptional(input.RowVersion), UserName, ct);
-        logger.LogInformation("Бронювання {BookingId} скасовано", id);
+        logger.LogInformation("Бронювання {BookingId} скасовано: статус {Status}, причина {CancelReason}",
+            id, BookingStatuses.Cancelled, input.Reason);
         return await GetAsync(id, ct);
     }
 
     public async Task<BookingDto> CheckInAsync(long id, CancellationToken ct = default)
     {
+        using var activity = BookingTelemetry.Source.StartActivity("booking.check-in");
+        activity?.SetTag("booking.id", id);
         await uow.Bookings.ChangeStatusAsync(id, BookingStatuses.Used, null, null, UserName, ct);
-        logger.LogInformation("Бронювання {BookingId}: глядач увійшов до зали", id);
+        logger.LogInformation("Бронювання {BookingId}: глядач увійшов до зали, статус {Status}", id, BookingStatuses.Used);
         return await GetAsync(id, ct);
     }
 }

@@ -1,4 +1,5 @@
 using AutoMapper;
+using Catalog.Bll.Diagnostics;
 using Catalog.Bll.Dtos;
 using Catalog.Bll.Specifications;
 using Catalog.Dal.Abstractions;
@@ -30,6 +31,8 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
 
     public async Task<MovieDto> CreateAsync(CreateMovieDto input, CancellationToken ct = default)
     {
+        using var activity = CatalogTelemetry.Source.StartActivity("movie.create");
+        activity?.SetTag("movie.genre_id", input.GenreId);
         await EnsureGenreExistsAsync(input.GenreId, ct);
         var title = input.Title.Trim();
         if (await uow.Movies.ExistsAsync(title, input.ReleaseYear, ct: ct))
@@ -39,12 +42,16 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
         await uow.Movies.AddAsync(movie, ct);
         await uow.SaveChangesAsync(ct);
 
-        logger.LogInformation("Створено фільм {MovieId} «{Title}»", movie.Id, movie.Title);
+        activity?.SetTag("movie.id", movie.Id);
+        logger.LogInformation("Створено фільм {MovieId} «{Title}» ({ReleaseYear}), жанр {GenreId}, рейтинг {AgeRating}",
+            movie.Id, movie.Title, movie.ReleaseYear, movie.GenreId, movie.AgeRating);
         return await GetByIdAsync(movie.Id, ct);
     }
 
     public async Task<MovieDto> UpdateAsync(int id, UpdateMovieDto input, CancellationToken ct = default)
     {
+        using var activity = CatalogTelemetry.Source.StartActivity("movie.update");
+        activity?.SetTag("movie.id", id);
         var movie = await LoadAsync(id, ct);
         uow.Movies.SetExpectedRowVersion(movie, Convert.FromBase64String(input.RowVersion));
 
@@ -60,19 +67,28 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
         movie.MoveToGenre(input.GenreId);
 
         await uow.SaveChangesAsync(ct);   // інша RowVersion у БД → ConflictException (409)
+        logger.LogInformation("Оновлено фільм {MovieId} «{Title}» ({ReleaseYear}): {DurationMinutes} хв, рейтинг {AgeRating}, жанр {GenreId}",
+            id, movie.Title, movie.ReleaseYear, movie.DurationMinutes, movie.AgeRating, movie.GenreId);
         return await GetByIdAsync(id, ct);
     }
 
     public async Task<MovieDto> SetDetailAsync(int id, SetMovieDetailDto input, CancellationToken ct = default)
     {
+        using var activity = CatalogTelemetry.Source.StartActivity("movie.set-detail");
+        activity?.SetTag("movie.id", id);
         var movie = await LoadAsync(id, ct);
         movie.SetDetail(input.Description, input.Country, input.TrailerUrl, input.PosterUrl, input.Budget);
         await uow.SaveChangesAsync(ct);
+        logger.LogInformation("Фільм {MovieId}: оновлено опис, країна {Country}", id, input.Country);
         return mapper.Map<MovieDto>(movie);
     }
 
     public async Task<MovieDto> AddCreditAsync(int id, AddCreditDto input, CancellationToken ct = default)
     {
+        using var activity = CatalogTelemetry.Source.StartActivity("movie.add-credit");
+        activity?.SetTag("movie.id", id);
+        activity?.SetTag("person.id", input.PersonId);
+        activity?.SetTag("credit.role", input.Role);
         var movie = await LoadAsync(id, ct);
         var person = await uow.People.GetByIdAsync(input.PersonId, ct)
                      ?? throw ValidationException.For("personId", $"Людини {input.PersonId} немає в каталозі.");
@@ -81,7 +97,8 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
         movie.AddCredit(person, Enum.Parse<CreditRole>(input.Role, ignoreCase: true), input.CharacterName, input.BillingOrder);
         await uow.SaveChangesAsync(ct);
 
-        logger.LogInformation("Фільм {MovieId}: додано {PersonId} як {Role}", id, person.Id, input.Role);
+        logger.LogInformation("Фільм {MovieId}: додано {PersonId} як {Role}, позиція в титрах {BillingOrder}",
+            id, person.Id, input.Role, input.BillingOrder);
         return mapper.Map<MovieDto>(movie);
     }
 
@@ -90,17 +107,22 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
         if (!Enum.TryParse<CreditRole>(role, ignoreCase: true, out var creditRole) || !Enum.IsDefined(creditRole))
             throw ValidationException.For("role", "Роль: Actor або Director.");
 
+        using var activity = CatalogTelemetry.Source.StartActivity("movie.remove-credit");
+        activity?.SetTag("movie.id", id);
         var movie = await LoadAsync(id, ct);
         movie.RemoveCredit(personId, creditRole);
         await uow.SaveChangesAsync(ct);
+        logger.LogInformation("Фільм {MovieId}: прибрано {PersonId} з ролі {Role}", id, personId, creditRole);
     }
 
     public async Task ArchiveAsync(int id, CancellationToken ct = default)
     {
+        using var activity = CatalogTelemetry.Source.StartActivity("movie.archive");
+        activity?.SetTag("movie.id", id);
         var movie = await uow.Movies.GetByIdAsync(id, ct) ?? throw EntityNotFoundException.For<Movie>(id);
         movie.Archive();
         await uow.SaveChangesAsync(ct);
-        logger.LogInformation("Фільм {MovieId} перенесено в архів", id);
+        logger.LogInformation("Фільм {MovieId} «{Title}» перенесено в архів, статус {Status}", id, movie.Title, "Archived");
     }
 
     /// <summary>Картка фільму (eager loading) з відстеженням змін — для читання й подальших операцій.</summary>

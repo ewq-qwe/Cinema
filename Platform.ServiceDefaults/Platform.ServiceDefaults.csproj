@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Спільні налаштування для КОЖНОГО сервісу платформи: Serilog, OpenTelemetry, CorrelationId,
+       health checks, service discovery, resilience для HttpClient. Бізнес-логіки тут немає. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAspireSharedProject>true</IsAspireSharedProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+
+    <!-- Service discovery + resilience (як у шаблоні aspire-servicedefaults) -->
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.11.0" />
+    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.11.0" />
+
+    <!-- OpenTelemetry: трасування, метрики, експорт OTLP в Aspire Dashboard -->
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.20.1" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.20.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.20.2" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.20.2" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.20.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.SqlClient" Version="1.20.2" />
+    <PackageReference Include="MongoDB.Driver.Core.Extensions.DiagnosticSources" Version="3.0.0" />
+    <!-- та сама версія драйвера, що й у Reviews (транзитивна 3.0.0 тягне вразливі SharpCompress / Snappier) -->
+    <PackageReference Include="MongoDB.Driver" Version="3.13.0" />
+    <!-- закриває NU1902/NU1903: транзитивна System.Security.Cryptography.Pkcs 9.0.x у SqlClient сервісу бронювання -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
+
+    <!-- Serilog: структуроване логування -->
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
+    <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
+    <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+</Project>

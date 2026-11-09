@@ -3,6 +3,7 @@ using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using MongoDB.Bson;
+using Reviews.Application.Common.Diagnostics;
 using Reviews.Application.Common.Messaging;
 using Reviews.Application.Common.Models;
 using Reviews.Application.Common.Validation;
@@ -36,6 +37,8 @@ public sealed class PostMessageCommandHandler(
 
     public async Task<MessageDto> Handle(PostMessageCommand cmd, CancellationToken ct)
     {
+        using var activity = ReviewsTelemetry.Source.StartActivity("discussion.post-message");
+        activity?.SetTag("discussion.id", cmd.DiscussionId);
         var discussionId = ObjectId.Parse(cmd.DiscussionId);
         var discussion = await discussions.GetByIdAsync(discussionId, ct)
                          ?? throw NotFoundException.For("Обговорення", cmd.DiscussionId);
@@ -60,6 +63,9 @@ public sealed class PostMessageCommandHandler(
             }
         }
 
+        activity?.SetTag("message.id", message.Id.ToString());
+        logger.LogInformation("Повідомлення {MessageId} у темі {DiscussionId} від глядача {CustomerId}, повідомлень у темі {MessagesCount}",
+            message.Id.ToString(), cmd.DiscussionId, cmd.AuthorId, discussion.Stats.MessagesCount);
         return mapper.Map<MessageDto>(message);
     }
 }

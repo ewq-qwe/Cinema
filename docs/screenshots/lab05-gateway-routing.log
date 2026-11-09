@@ -1,0 +1,18 @@
+# Лаб. 05 — логи Gateway (Serilog, CompactJsonFormatter → logs/gateway-*.json):
+# маршрут, кластер, адреса від service discovery, статус, тривалість, розмір; генерація CorrelationId; помилки проксування.
+# Рядок Error 12:59 — перша спроба сценарію відмови (до звуження таймаутів агрегатора): YARP ActivityTimeout 30 с → 504.
+
+12:56:12.890 Information [41691742-a35d-431b-88c8-ef52283f3e30] CorrelationId 41691742-a35d-431b-88c8-ef52283f3e30 згенеровано для вхідного запиту без заголовка X-Correlation-Id
+12:59:05.088 Error       [lab05-demo-reviews-down] Gateway: GET /api/aggregator/bookings/1/full -> route aggregator / cluster aggregator (http://localhost:5110/) FAILED: RequestTimedOut, status 504 in 30040 ms
+13:00:57.751 Information [db674b1d-da37-42b0-9000-97adbc9a22bc] Gateway: GET /api/customers/1 -> route booking-customers / cluster booking (http://localhost:5093/): 200 in 1140 ms, 186 bytes
+13:00:57.901 Information [4b3f9321-5ff0-45bf-9837-cc76ea14e526] CorrelationId 4b3f9321-5ff0-45bf-9837-cc76ea14e526 згенеровано для вхідного запиту без заголовка X-Correlation-Id
+13:00:59.067 Information [4b3f9321-5ff0-45bf-9837-cc76ea14e526] Gateway: GET /api/movies?pageSize=1 -> route catalog-movies / cluster catalog (http://localhost:5024/): 200 in 1165 ms, 255 bytes
+13:01:37.121 Information [lab05-demo-reviews-down] Gateway: GET /api/aggregator/bookings/1/full -> route aggregator / cluster aggregator (http://localhost:5110/): 200 in 5258 ms, 1548 bytes
+13:02:35.132 Information [a53843b2-5aca-4d8e-916d-e6169c5031ba] CorrelationId a53843b2-5aca-4d8e-916d-e6169c5031ba згенеровано для вхідного запиту без заголовка X-Correlation-Id
+13:02:35.884 Information [a53843b2-5aca-4d8e-916d-e6169c5031ba] Gateway: GET /api/aggregator/bookings/1/full -> route aggregator / cluster aggregator (http://localhost:5110/): 200 in 751 ms, 1949 bytes
+13:02:36.006 Information [3c25867b-33dd-453a-af47-c480f3d8e619] CorrelationId 3c25867b-33dd-453a-af47-c480f3d8e619 згенеровано для вхідного запиту без заголовка X-Correlation-Id
+13:02:36.132 Information [3c25867b-33dd-453a-af47-c480f3d8e619] Gateway: GET /api/aggregator/movies/2/full -> route aggregator / cluster aggregator (http://localhost:5110/): 200 in 125 ms, 1616 bytes
+13:02:36.322 Information [2cd6968a-9a99-4813-8590-bcb223fde206] CorrelationId 2cd6968a-9a99-4813-8590-bcb223fde206 згенеровано для вхідного запиту без заголовка X-Correlation-Id
+13:02:36.413 Information [2cd6968a-9a99-4813-8590-bcb223fde206] Gateway: GET /api/aggregator/bookings/999/full -> route aggregator / cluster aggregator (http://localhost:5110/): 404 in 91 ms, 213 bytes
+13:02:36.683 Information [my-own-id] Gateway: GET /api/movies/1/rating -> route reviews-movie-rating / cluster reviews (http://localhost:5136/): 200 in 15 ms, 137 bytes
+13:02:37.358 Information [dc9bacfa-4e74-4ff3-84d6-015a6b9b0982] CorrelationId dc9bacfa-4e74-4ff3-84d6-015a6b9b0982 згенеровано для вхідного запиту без заголовка X-Correlation-Id
