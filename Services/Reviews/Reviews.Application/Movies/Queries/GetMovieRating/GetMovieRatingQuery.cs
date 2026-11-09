@@ -1,5 +1,6 @@
 using FluentValidation;
 using MediatR;
+using Reviews.Application.Common.Caching;
 using Reviews.Application.Common.Interfaces;
 using Reviews.Application.Common.Messaging;
 using Reviews.Application.Common.Models;
@@ -8,7 +9,11 @@ using Reviews.Domain.Exceptions;
 namespace Reviews.Application.Movies.Queries.GetMovieRating;
 
 /// <summary>Середня оцінка й розподіл оцінок фільму (aggregation pipeline в Infrastructure).</summary>
-public sealed record GetMovieRatingQuery(int MovieId) : IQuery<MovieRatingDto>;
+public sealed record GetMovieRatingQuery(int MovieId) : IQuery<MovieRatingDto>, ICacheableQuery
+{
+    public string? CacheKey => ReviewsCacheKeys.MovieRating(MovieId);
+    public CachePolicy CachePolicy => CachePolicy.MovieRating;
+}
 
 public sealed class GetMovieRatingQueryHandler(IReviewQueries queries) : IRequestHandler<GetMovieRatingQuery, MovieRatingDto>
 {

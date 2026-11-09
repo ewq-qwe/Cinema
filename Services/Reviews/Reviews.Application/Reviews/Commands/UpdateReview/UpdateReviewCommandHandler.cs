@@ -1,6 +1,7 @@
 using AutoMapper;
 using MediatR;
 using Microsoft.Extensions.Logging;
+using Reviews.Application.Common.Caching;
 using Reviews.Application.Common.Diagnostics;
 using MongoDB.Bson;
 using Reviews.Application.Common.Models;
@@ -10,7 +11,8 @@ using Reviews.Domain.ValueObjects;
 
 namespace Reviews.Application.Reviews.Commands.UpdateReview;
 
-public sealed class UpdateReviewCommandHandler(IReviewRepository reviews, IMapper mapper, ILogger<UpdateReviewCommandHandler> logger)
+public sealed class UpdateReviewCommandHandler(
+    IReviewRepository reviews, IMapper mapper, ITwoLevelCache cache, ILogger<UpdateReviewCommandHandler> logger)
     : IRequestHandler<UpdateReviewCommand, ReviewDetailsDto>
 {
     public async Task<ReviewDetailsDto> Handle(UpdateReviewCommand cmd, CancellationToken ct)
@@ -29,6 +31,9 @@ public sealed class UpdateReviewCommandHandler(IReviewRepository reviews, IMappe
 
         // Репозиторій ще раз перевіряє версію атомарно (filter _id + version) — на випадок гонки між читанням і записом
         await reviews.UpdateAsync(review, ct);
+        await cache.RemoveAsync(ReviewsCacheKeys.Review(cmd.Id), "ReviewUpdated", ct);
+        await cache.RemoveAsync(ReviewsCacheKeys.MovieRating(review.MovieId), "ReviewUpdated", ct);
+        await cache.BumpVersionAsync(ReviewsCacheKeys.ListVersion, "ReviewUpdated", ct);
         logger.LogInformation("Відгук {ReviewId} оновлено: оцінка {Rating}, версія {Version}", cmd.Id, review.Rating.Value, review.Version);
         return mapper.Map<ReviewDetailsDto>(review);
     }

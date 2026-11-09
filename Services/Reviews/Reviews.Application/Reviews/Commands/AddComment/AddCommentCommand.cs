@@ -3,6 +3,7 @@ using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.Logging;
 using MongoDB.Bson;
+using Reviews.Application.Common.Caching;
 using Reviews.Application.Common.Diagnostics;
 using Reviews.Application.Common.Messaging;
 using Reviews.Application.Common.Models;
@@ -17,7 +18,8 @@ namespace Reviews.Application.Reviews.Commands.AddComment;
 /// <summary>Додати коментар у вкладений масив comments[] відгуку.</summary>
 public sealed record AddCommentCommand(string ReviewId, string Author, string Text) : ICommand<ReviewDetailsDto>;
 
-public sealed class AddCommentCommandHandler(IReviewRepository reviews, IMapper mapper, ILogger<AddCommentCommandHandler> logger)
+public sealed class AddCommentCommandHandler(
+    IReviewRepository reviews, IMapper mapper, ITwoLevelCache cache, ILogger<AddCommentCommandHandler> logger)
     : IRequestHandler<AddCommentCommand, ReviewDetailsDto>
 {
     public async Task<ReviewDetailsDto> Handle(AddCommentCommand cmd, CancellationToken ct)
@@ -29,6 +31,8 @@ public sealed class AddCommentCommandHandler(IReviewRepository reviews, IMapper 
 
         review.AddComment(cmd.Author, cmd.Text);  // правила (лише full, не більше 20) — у сутності
         await reviews.UpdateAsync(review, ct);    // з перевіркою версії
+        await cache.RemoveAsync(ReviewsCacheKeys.Review(cmd.ReviewId), "CommentAdded", ct);
+        await cache.BumpVersionAsync(ReviewsCacheKeys.ListVersion, "CommentAdded", ct);   // commentsCount у списках
         logger.LogInformation("До відгуку {ReviewId} додано коментар, усього коментарів {CommentsCount}", cmd.ReviewId, review.Comments.Count);
         return mapper.Map<ReviewDetailsDto>(review);
     }

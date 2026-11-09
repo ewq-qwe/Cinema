@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Grpc.Core;
 using Platform.Aggregator.Models;
 
 namespace Platform.Aggregator.Services;
@@ -60,7 +61,16 @@ public sealed class CallTracker(ILogger logger, CancellationToken ct)
             Record(service, operation, status, sw);
             return new CallResult<T>(status, value);
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested)   // скасування клієнтом — не відмова сервісу
+        catch (RpcException ex) when (!ct.IsCancellationRequested)
+        {
+            // gRPC (Лаб. 06): UNAVAILABLE (сервіс зупинено), DEADLINE_EXCEEDED (не вклався в deadline) тощо → попередження
+            Record(service, operation, CallStatus.Unavailable, sw);
+            logger.LogWarning(ex, "{Service:l} is unavailable: {Operation:l} failed with gRPC status {GrpcStatus} after {ElapsedMs} ms ({GrpcDetail})",
+                service, operation, ex.StatusCode, sw.ElapsedMilliseconds, ex.Status.Detail);
+            _unavailable.GetOrAdd(service, _ => new()).Enqueue(operation);
+            return new CallResult<T>(CallStatus.Unavailable, default);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)   // HTTP (Лаб. 05); скасування клієнтом — не відмова сервісу
         {
             Record(service, operation, CallStatus.Unavailable, sw);
             logger.LogWarning(ex, "{Service:l} is unavailable: {Operation:l} failed after {ElapsedMs} ms ({ErrorType}: {Error})",

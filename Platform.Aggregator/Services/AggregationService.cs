@@ -12,13 +12,12 @@ public interface IAggregationService
 
 /// <summary>
 /// Aggregator Pattern: основний ресурс читається першим (без нього агрегувати нічого), а незалежні виклики
-/// до різних сервісів виконуються ОДНОЧАСНО через Task.WhenAll. Відмова необов'язкового сервісу дає
+/// до різних сервісів виконуються ОДНОЧАСНО через Task.WhenAll. Транспорт — <see cref="IPlatformSources"/>:
+/// gRPC (Лаб. 06, за замовчуванням) або HTTP (Лаб. 05). Відмова необов'язкового сервісу дає
 /// часткову відповідь з попередженням у Warnings, а не 500.
 /// </summary>
 public sealed class AggregationService(
-    BookingClient booking,
-    CatalogClient catalog,
-    ReviewsClient reviews,
+    IPlatformSources sources,
     ILogger<AggregationService> logger) : IAggregationService
 {
     public const int LatestReviewsCount = 3;
@@ -30,16 +29,17 @@ public sealed class AggregationService(
     {
         using var activity = Source.StartActivity("AggregateBookingCard");
         activity?.SetTag("booking.id", bookingId);
+        activity?.SetTag("aggregator.transport", sources.Transport);
         var tracker = new CallTracker(logger, ct);
 
         // 1. Основні дані — бронювання. Без нього картки немає.
         var order = await tracker.RequiredAsync(BookingClient.ServiceName, $"booking {bookingId}",
-            () => booking.GetBookingAsync(bookingId, ct));
+            () => sources.GetBookingAsync(bookingId, ct));
         if (order is null) return null;
 
         // 2. Сеанс (той самий booking-api) — з нього відомо, який це фільм у Каталозі
         var session = await tracker.TryAsync(BookingClient.ServiceName, $"session {order.SessionId}",
-            () => booking.GetSessionAsync(order.SessionId, ct));
+            () => sources.GetSessionAsync(order.SessionId, ct));
         if (session.Status == CallStatus.NotFound)
             tracker.Warn($"Сеанс {order.SessionId} бронювання {bookingId} не знайдено.");
         if (session.Value is { } s && s.Id != order.SessionId)
@@ -55,10 +55,10 @@ public sealed class AggregationService(
             activity?.SetTag("movie.id", movieId);
 
             // 3. Незалежні виклики catalog-api і reviews-api — паралельно
-            var movieTask = tracker.TryAsync(CatalogClient.ServiceName, $"movie {movieId}", () => catalog.GetMovieAsync(movieId, ct));
-            var ratingTask = tracker.TryAsync(ReviewsClient.ServiceName, $"rating of movie {movieId}", () => reviews.GetMovieRatingAsync(movieId, ct));
+            var movieTask = tracker.TryAsync(CatalogClient.ServiceName, $"movie {movieId}", () => sources.GetMovieAsync(movieId, ct));
+            var ratingTask = tracker.TryAsync(ReviewsClient.ServiceName, $"rating of movie {movieId}", () => sources.GetMovieRatingAsync(movieId, ct));
             var reviewsTask = tracker.TryAsync(ReviewsClient.ServiceName, $"latest reviews of movie {movieId}",
-                () => reviews.GetLatestReviewsAsync(movieId, LatestReviewsCount, ct));
+                () => sources.GetLatestReviewsAsync(movieId, LatestReviewsCount, ct));
             await Task.WhenAll(movieTask, ratingTask, reviewsTask);
 
             var movieResult = await movieTask;
@@ -88,18 +88,19 @@ public sealed class AggregationService(
     {
         using var activity = Source.StartActivity("AggregateMovieCard");
         activity?.SetTag("movie.id", movieId);
+        activity?.SetTag("aggregator.transport", sources.Transport);
         var tracker = new CallTracker(logger, ct);
 
         // 1. Основні дані — фільм з Каталогу
-        var movie = await tracker.RequiredAsync(CatalogClient.ServiceName, $"movie {movieId}", () => catalog.GetMovieAsync(movieId, ct));
+        var movie = await tracker.RequiredAsync(CatalogClient.ServiceName, $"movie {movieId}", () => sources.GetMovieAsync(movieId, ct));
         if (movie is null) return null;
 
         // 2. Сеанси (booking-api) і відгуки (reviews-api) — паралельно
         var sessionsTask = tracker.TryAsync(BookingClient.ServiceName, $"upcoming sessions of movie {movieId}",
-            () => booking.GetUpcomingSessionsAsync(movieId, ct));
-        var ratingTask = tracker.TryAsync(ReviewsClient.ServiceName, $"rating of movie {movieId}", () => reviews.GetMovieRatingAsync(movieId, ct));
+            () => sources.GetUpcomingSessionsAsync(movieId, ct));
+        var ratingTask = tracker.TryAsync(ReviewsClient.ServiceName, $"rating of movie {movieId}", () => sources.GetMovieRatingAsync(movieId, ct));
         var reviewsTask = tracker.TryAsync(ReviewsClient.ServiceName, $"latest reviews of movie {movieId}",
-            () => reviews.GetLatestReviewsAsync(movieId, LatestReviewsCount, ct));
+            () => sources.GetLatestReviewsAsync(movieId, LatestReviewsCount, ct));
         await Task.WhenAll(sessionsTask, ratingTask, reviewsTask);
 
         var sessions = ((await sessionsTask).Value ?? [])

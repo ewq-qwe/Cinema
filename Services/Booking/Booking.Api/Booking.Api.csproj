@@ -6,7 +6,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.85.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.3.0" />
+  </ItemGroup>
+
+  <!-- Лаб. 06: gRPC-контракт; серверна частина генерується тут, клієнтська — в Platform.Aggregator -->
+  <ItemGroup>
+    <Protobuf Include="Protos\booking.proto" GrpcServices="Server" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -5,6 +5,8 @@ using Reviews.Application.Common.Mapping;
 using Reviews.Infrastructure;
 using Reviews.Infrastructure.Persistence;
 using Reviews.WebApi.Errors;
+using Reviews.WebApi.Grpc;
+using Reviews.WebApi.Metrics;
 using Reviews.WebApi.Mapping;
 using Platform.ServiceDefaults.Correlation;
 
@@ -17,6 +19,17 @@ builder.AddServiceDefaults();
 builder.Services
     .AddApplication(builder.Configuration)      // MediatR + behaviors (Logging → Validation → Performance), валідатори
     .AddInfrastructure(builder.Configuration);  // MongoDB: мапінг, контекст, репозиторії, запити, індекси, сідінг
+
+// ---------- Лаб. 06: L2-кеш — Redis через Aspire (ресурс "redis"); L1 і CachingBehavior реєструє AddApplication ----------
+builder.AddRedisDistributedCache("redis",
+    // Кеш — не критична залежність: його відмова дає Degraded у CacheHealthCheck, а не Unhealthy всього сервісу
+    settings => settings.DisableHealthChecks = true,
+    // Короткі таймаути: недоступний Redis має швидко «відпускати» запит до L1 / БД, а не тримати його 5 с
+    options => { options.AbortOnConnectFail = false; options.ConnectTimeout = 1000; options.SyncTimeout = 1000; options.AsyncTimeout = 1000; });
+
+// ---------- Лаб. 06: gRPC-сервер (interceptor логування — зі ServiceDefaults) ----------
+builder.Services.AddHealthChecks().AddCheck<CacheHealthCheck>("cache");   // статистика кешу L1 / L2 у /health
+builder.Services.AddDefaultGrpc(detailedErrors: builder.Environment.IsDevelopment());
 
 // ---------- AutoMapper: профілі Application (сутності → DTO) і WebApi (HTTP-моделі → команди) ----------
 builder.Services.AddAutoMapper(cfg =>
@@ -69,6 +82,7 @@ if (!app.Environment.IsProduction())
 }
 
 app.MapControllers();
+app.MapGrpcService<ReviewsGrpcService>();   // HTTP/2 (endpoint "grpc" в AppHost)
 app.MapDefaultEndpoints();   // /health (разом із перевіркою MongoDB) і /alive
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 

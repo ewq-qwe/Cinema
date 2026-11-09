@@ -1,5 +1,6 @@
 using System.Reflection;
 using Booking.Api.Errors;
+using Booking.Api.Grpc;
 using Booking.Bll.Mapping;
 using Booking.Bll.Services;
 using Booking.Dal;
@@ -40,6 +41,9 @@ builder.Services.AddExceptionHandler<DomainExceptionHandler>();
 
 builder.Services.AddControllers();
 
+// ---------- Лаб. 06: gRPC-сервер для внутрішніх викликів (interceptor логування — зі ServiceDefaults) ----------
+builder.Services.AddDefaultGrpc(detailedErrors: builder.Environment.IsDevelopment());
+
 // ---------- OpenAPI / Swagger ----------
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(o =>
@@ -68,6 +72,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapGrpcService<BookingGrpcService>();   // HTTP/2 (endpoint "grpc" в AppHost)
 app.MapDefaultEndpoints();   // /health і /alive
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
