@@ -4,15 +4,12 @@ using Booking.Bll.Mapping;
 using Booking.Bll.Services;
 using Booking.Dal;
 using Booking.Dal.Abstractions;
-using Serilog;
+using Platform.ServiceDefaults.Correlation;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ---------- Логування: Serilog (налаштування — розділ "Serilog" в appsettings.json) ----------
-builder.Host.UseSerilog((ctx, cfg) => cfg
-    .ReadFrom.Configuration(ctx.Configuration)
-    .Enrich.FromLogContext()
-    .WriteTo.Console());
+// ---------- Лаб. 05: спільні налаштування платформи — Serilog, OpenTelemetry, health checks, service discovery ----------
+builder.AddServiceDefaults();
 
 // ---------- Рядок підключення: appsettings.json → перевизначається ConnectionStrings__BookingDb ----------
 // Під Aspire його передає AppHost (ресурс бази має те саме ім'я "BookingDb").
@@ -59,8 +56,8 @@ builder.Services.AddSwaggerGen(o =>
 
 var app = builder.Build();
 
-// Логування запитів — зовнішнім шаром, щоб у лог потрапляв фінальний статус (404/409), а не виняток як 500
-app.UseSerilogRequestLogging();   // один рядок логу на запит із RequestId (кореляція)
+// CorrelationId + межі запиту — зовнішнім шаром, щоб у лог потрапляв фінальний статус (404/409), а не виняток як 500
+app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
@@ -71,6 +68,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapDefaultEndpoints();   // /health і /alive
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();

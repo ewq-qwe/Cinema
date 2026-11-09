@@ -3,7 +3,8 @@
 * **Лаб. 01** — три бази даних для мікросервісів (розділи нижче, від «Що де лежить»).
 * **Лаб. 02** — мікросервіс «Бронювання» як вертикаль DAL → BLL → API на ADO.NET + Dapper із запуском через .NET Aspire: розділ «Лаб. 02».
 * **Лаб. 03** — мікросервіс «Каталог» на EF Core: Code-First, Fluent API, міграції, Repository / Unit of Work, специфікації, FluentValidation, Serilog: розділ «Лаб. 03».
-* **Лаб. 04** — мікросервіс «Відгуки» на MongoDB за Clean Architecture: CQRS + MediatR, Value Objects, Pipeline Behaviors, BsonClassMap, індекси й сідінг: розділ «Лаб. 04» в кінці файлу.
+* **Лаб. 04** — мікросервіс «Відгуки» на MongoDB за Clean Architecture: CQRS + MediatR, Value Objects, Pipeline Behaviors, BsonClassMap, індекси й сідінг: розділ «Лаб. 04».
+* **Лаб. 05** — усі три сервіси в одній платформі .NET Aspire: ServiceDefaults (Serilog + OpenTelemetry + CorrelationId), API Gateway на YARP, Aggregator: розділ «Лаб. 05» в кінці файлу.
 
 **Домен.** Кінотеатр «Кадр» (вигаданий, 2 зали) продає квитки онлайн. Глядачі дивляться афішу, бронюють і оплачують місця на сеанс, а після перегляду пишуть відгуки й обговорюють фільми. Адміністратор веде каталог фільмів і розклад.
 
@@ -38,7 +39,10 @@ db/
     └── queries.js         запити й агрегації
 scripts/deploy.ps1         розгортання всіх трьох БД однією командою
 Platform.slnx              одне рішення на всю платформу
-Platform.AppHost/          оркестрація .NET Aspire (AppHost.cs)
+Platform.AppHost/          оркестрація .NET Aspire (AppHost.cs): SQL Server і MongoDB з томами, сервіси, Aggregator, Gateway
+Platform.ServiceDefaults/  спільні налаштування (Лаб. 05): Serilog, OpenTelemetry, CorrelationId, health checks, service discovery
+Platform.ApiGateway/       API Gateway на YARP — єдина точка входу (http://localhost:5000)
+Platform.Aggregator/       Aggregator Pattern: картки бронювання й фільму з трьох сервісів (+ Platform.Aggregator.Tests)
 Services/Booking/          мікросервіс «Бронювання» (Проєкт №1, Лаб. 02): Booking.Api · Booking.Bll · Booking.Dal · Booking.Domain · Booking.Tests
 Services/Catalog/          мікросервіс «Каталог» (Проєкт №2, Лаб. 03): Catalog.Api (+ Dockerfile) · Catalog.Bll · Catalog.Dal · Catalog.Domain · Catalog.Tests
 Services/Reviews/          мікросервіс «Відгуки» (Проєкт №3, Лаб. 04): Reviews.Domain · Reviews.Application · Reviews.Infrastructure · Reviews.WebApi · Reviews.Tests
@@ -666,3 +670,180 @@ Aspire Dashboard — `mongo`, `ReviewsDb` і `reviews-api` у статусі Run
 Swagger Reviews API:
 
 ![Swagger](docs/screenshots/lab04-swagger.jpg)
+
+## Лаб. 05 — мікросервісна платформа на .NET Aspire (YARP Gateway, Aggregator, OpenTelemetry, Serilog)
+
+Три мікросервіси з Лаб. 02–04 працюють як одна платформа. Її запускає одна команда; клієнт звертається лише до Gateway; сервіси знаходять один одного за логічними іменами; один запит видно в Dashboard і як trace, і за CorrelationId.
+
+### Архітектура
+
+```mermaid
+flowchart LR
+    C["Клієнт"] -->|"http://localhost:5000"| G["gateway<br/>YARP + CorrelationId"]
+    G -->|"/api/aggregator/*"| A["aggregator<br/>Task.WhenAll"]
+    G -->|"/api/bookings · sessions · customers"| B["booking-api<br/>Лаб. 02"]
+    G -->|"/api/movies · genres · people"| K["catalog-api<br/>Лаб. 03"]
+    G -->|"/api/reviews · discussions · movies/{id}/rating"| R["reviews-api<br/>Лаб. 04"]
+    A --> B
+    A --> K
+    A --> R
+    B --> SQL1[("SQL Server<br/>CinemaBooking")]
+    K --> SQL2[("SQL Server<br/>CinemaCatalog")]
+    R --> M[("MongoDB<br/>cinema_reviews")]
+```
+
+| Компонент | Що робить |
+|---|---|
+| `Platform.AppHost` | Оркестрація без бізнес-логіки. Контейнери SQL Server (пароль — параметр-секрет `sql-password`) і MongoDB з томами `cinema-sql-data` / `cinema-mongo-data`. Сервіси реєструються через `AddProject`, БД передаються через `WithReference`. Порядок запуску задано `WaitFor`: БД → сервіси → aggregator → gateway |
+| `Platform.ServiceDefaults` | Підключається в кожен сервіс через `AddServiceDefaults()`: Serilog, OpenTelemetry (ASP.NET Core, HttpClient, SqlClient, MongoDB), `CorrelationIdMiddleware` і `CorrelationIdHandler`, health checks `/health` і `/alive`, service discovery, resilience для HttpClient |
+| `Platform.ApiGateway` | YARP на порту **5000**. Маршрути й кластери описано в `appsettings.json`, адреси кластерів — логічні імена (`http://booking-api`). Логує рішення про маршрутизацію; рахує метрики `gateway.requests`, `gateway.request.duration`, `gateway.proxy.errors` |
+| `Platform.Aggregator` | Typed HttpClients `BookingClient`, `CatalogClient`, `ReviewsClient` (адреса `https+http://` + ім'я ресурсу), паралельні виклики через `Task.WhenAll`, часткові відповіді з `warnings` |
+| `Services/*` | Лаб. 02–04 без змін бізнес-логіки (див. «Інтеграція сервісів») |
+
+### Запуск
+
+Потрібні **Docker Desktop** (запущений) і **.NET SDK 10**. Пароль SQL Server один раз зберігається в секретах AppHost:
+
+```bash
+dotnet user-secrets set "Parameters:sql-password" "Cinema_Aspire_2026!" --project Platform.AppHost
+```
+
+Якщо секрет не задано, Dashboard запитає значення під час першого запуску. Потім уся платформа стартує однією командою:
+
+```bash
+dotnet run --project Platform.AppHost
+```
+
+- Dashboard: http://localhost:15180 (посилання з токеном — у консолі).
+- Gateway: http://localhost:5000 (`GET /` показує таблицю маршрутів).
+- Swagger сервісів і агрегатора — у колонці URL Dashboard.
+
+Дані зберігаються в томах між перезапусками. Скрипти Лаб. 01 для `CinemaBooking` виконуються лише при першому створенні БД: якщо БД уже є, `SET NOEXEC ON` вимикає решту батчів. Щоб почати з чистої бази, видаліть томи:
+
+```bash
+docker volume rm cinema-sql-data cinema-mongo-data
+```
+
+Пароль `sa` зберігається в томі, тому `sql-password` має лишатися тим самим. Пароль MongoDB Aspire генерує й зберігає в user-secrets сам.
+
+### Інтеграція сервісів (мінімальні зміни)
+
+| Сервіс | Що змінено |
+|---|---|
+| Booking.Api, Catalog.Api, Reviews.WebApi | `Program.cs`: `builder.AddServiceDefaults()` замість власного `UseSerilog`; `app.UseMiddleware<CorrelationIdMiddleware>()` (зі ServiceDefaults); `app.MapDefaultEndpoints()` |
+| те саме | `.csproj`: посилання на `Platform.ServiceDefaults` замість пакета `Serilog.AspNetCore`; `appsettings.json`: прибрано власні sinks Serilog (лишилося точкове перевизначення рівня SQL-логів EF Core у Catalog) |
+| Catalog.Api, Reviews.WebApi | видалено власні `Logging/CorrelationIdMiddleware.cs` — їх замінила спільна версія з ServiceDefaults |
+| Reviews.Infrastructure | один рядок — підписка драйвера на трасування: `settings.ClusterConfigurator = cb => cb.Subscribe(new DiagnosticsActivityEventSubscriber())` |
+| Booking.Bll, Catalog.Bll, Reviews.Application | логування бізнес-подій і власні spans (див. нижче); правила й поведінка операцій не змінилися |
+
+Правил і поведінки операцій (BLL, DAL, Domain, Application) не змінено — лише додано телеметрію. Рядки підключення сервіси читають як і раніше: `ConnectionStrings:BookingDb` / `CatalogDb` / `ReviewsDb`. Під Aspire їх передає `WithReference`, без Aspire використовуються резервні значення з `appsettings.json`.
+
+### Gateway (YARP)
+
+| Маршрут | Шлях | Кластер → ресурс | Order |
+|---|---|---|---|
+| `aggregator` | `/api/aggregator/{**catch-all}` | `aggregator` | 1 |
+| `reviews-movie-rating` | `/api/movies/{movieId}/rating` | `reviews` → `reviews-api` | 2 |
+| `booking-bookings` · `booking-sessions` · `booking-customers` | `/api/bookings/…` · `/api/sessions/…` · `/api/customers/…` | `booking` → `booking-api` | 10 |
+| `catalog-genres` · `catalog-people` | `/api/genres/…` · `/api/people/…` | `catalog` → `catalog-api` | 10 |
+| `reviews-reviews` · `reviews-discussions` | `/api/reviews/…` · `/api/discussions/…` | `reviews` → `reviews-api` | 10 |
+| `catalog-movies` | `/api/movies/{**catch-all}` | `catalog` → `catalog-api` | 100 |
+
+- **Пріоритет маршрутів.** `/api/movies/*` належить Каталогу, але `/api/movies/{id}/rating` — сервісу відгуків. Тому специфічніший маршрут має менший `Order`.
+- **Додаткові налаштування.** Кластери мають `ActivityTimeout`, маршрути — `MaxRequestBodySize` (1 МБ) і `Metadata` (Team, Version). Каталог використовує `LoadBalancingPolicy: RoundRobin`.
+- **Service discovery.** `AddServiceDiscoveryDestinationResolver()` замінює `http://booking-api` на реальну адресу від Aspire. Без Aspire адреси беруться з секції `Services` в `appsettings.json`.
+- **CorrelationId.** `CorrelationIdMiddleware` стоїть перед `MapReverseProxy()`. Якщо клієнт надіслав `X-Correlation-Id`, той зберігається, інакше генерується GUID; факт генерації логується. YARP копіює заголовок у проксований запит.
+- **Логування.** `GatewayLoggingMiddleware` пише один рядок на запит: маршрут, кластер, адреса, статус, тривалість, розмір відповіді. Помилки проксування (таймаут, відмова з'єднання) пишуться як Error з типом помилки. Приклад: [`docs/screenshots/lab05-gateway-routing.log`](docs/screenshots/lab05-gateway-routing.log).
+
+### Aggregator
+
+| Ендпоінт | Основні дані (послідовно) | Паралельно (`Task.WhenAll`) |
+|---|---|---|
+| `GET /api/aggregator/bookings/{id}/full` — картка бронювання | booking-api: бронювання → сеанс (з нього `movieId`) | catalog-api: фільм · reviews-api: рейтинг · reviews-api: останні відгуки |
+| `GET /api/aggregator/movies/{id}/full` — картка фільму | catalog-api: фільм | booking-api: найближчі сеанси · reviews-api: рейтинг · reviews-api: останні відгуки |
+
+- **Часткові відмови.** Кожен необов'язковий виклик обгорнутий у `CallTracker.TryAsync`. Він логує «Calling … → responded in N ms», а відмову перетворює на попередження в `warnings` (одне на сервіс). У `sources` видно статус і тривалість кожного виклику.
+- **Коли картки немає.** Основний ресурс не знайдено → 404. Основний сервіс недоступний → 503 + `Retry-After`.
+- **Узгодженість.** Агрегатор попереджає, якщо назва фільму в Бронюванні (копія довідника) відрізняється від Каталогу, і відкидає сеанси чи відгуки іншого фільму.
+- **JSON.** camelCase, null-поля не серіалізуються. `CancellationToken` передається в усі вихідні виклики.
+- **Таймаути.** Зупинений у Dashboard сервіс не відмовляє одразу, а «висить». Тому агрегатор звужує стандартні таймаути resilience через секцію `HttpResilience` в `appsettings.json`: спроба 2 с, загалом 5 с, 1 повтор. Тоді часткова відповідь приходить за ~5 с, а не впирається в 30-секундний таймаут Gateway (504).
+
+### Бізнес-події та власні spans
+
+Кожен бізнес-шар має власний `ActivitySource`, підключений до OpenTelemetry у ServiceDefaults: `Booking.Bll` ([`BookingTelemetry`](Services/Booking/Booking.Bll/Diagnostics/BookingTelemetry.cs)), `Catalog.Bll` ([`CatalogTelemetry`](Services/Catalog/Catalog.Bll/Diagnostics/CatalogTelemetry.cs)) і `Reviews.Application` ([`ReviewsTelemetry`](Services/Reviews/Reviews.Application/Common/Diagnostics/ReviewsTelemetry.cs)). Span операції обгортає її SQL- чи MongoDB-команди. Логи мають структуровані властивості; чутливих даних (TransactionId оплати, email, телефон) у них немає.
+
+| Сервіс | Spans | Бізнес-події в логах (властивості) |
+|---|---|---|
+| booking-api | `booking.create`, `booking.pay`, `booking.cancel`, `booking.check-in` | бронювання створено / оплачено / скасовано / використано: `BookingId`, `CustomerId`, `SessionId`, `SeatsCount`, `Amount`, `PaymentMethod`, `Status` |
+| catalog-api | `movie.create`, `movie.update`, `movie.set-detail`, `movie.add-credit`, `movie.remove-credit`, `movie.archive` | фільм створено / оновлено / в архіві, титри змінено: `MovieId`, `Title`, `ReleaseYear`, `GenreId`, `AgeRating`, `PersonId`, `Role`, `Status` |
+| reviews-api | `review.create`, `review.update`, `review.delete`, `review.add-comment`, `discussion.create`, `discussion.post-message` | відгук створено / оновлено / видалено, коментар, тема, повідомлення: `ReviewId`, `MovieId`, `Kind`, `Rating`, `CustomerId`, `Version`, `DiscussionId`, `MessageId` |
+| aggregator | `AggregateBookingCard`, `AggregateMovieCard` | «Calling … / responded in N ms» для кожного виклику сервісу |
+
+![Бізнес-span](docs/screenshots/lab05-business-span.jpg)
+
+### Спостережуваність
+
+- **Serilog.** Кожен запис — JSON (`CompactJsonFormatter`) у консолі й `logs/<сервіс>-*.json`. `writeToProviders: true` передає записи провайдеру OpenTelemetry → вкладка **Structured logs**.
+  - Властивості: `ServiceName`, `EnvironmentName`, `MachineName`, `ThreadId`, `CorrelationId`, `TraceId`, `SpanId`.
+  - Рівні: Debug у Development, Information в інших середовищах. Логи EF Core, HttpClient і Microsoft.* — від Warning.
+- **OpenTelemetry.** Spans вхідних запитів (ASP.NET Core), вихідних викликів (HttpClient), SQL (SqlClient — і Dapper, і EF Core) та MongoDB, а також власні spans `AggregateBookingCard` / `AggregateMovieCard`. Метрики: ASP.NET Core, HttpClient, runtime, Gateway.
+  - Експорт — OTLP в Aspire Dashboard.
+  - Sampling: 100 % у Development, `OpenTelemetry:SamplingRatio` (10 %) в інших середовищах.
+- **CorrelationId чи TraceId.** `CorrelationId` створює й передає сам застосунок: заголовок `X-Correlation-Id` у Gateway → YARP → сервіси, а з агрегатора — через `CorrelationIdHandler` у HttpClient. Повертається клієнту в заголовку відповіді. `TraceId` генерує OpenTelemetry для технічного трасування.
+
+### Перевірка (curl)
+
+```bash
+curl -i http://localhost:5000/api/bookings/1
+```
+
+```bash
+curl -i "http://localhost:5000/api/movies?page=1&pageSize=2"
+```
+
+```bash
+curl -i -H "X-Correlation-Id: demo-001" http://localhost:5000/api/aggregator/bookings/1/full
+```
+
+### Самоперевірка з умови
+
+| Перевірка | Результат |
+|---|---|
+| AppHost запускає все однією командою, у Dashboard 10 ресурсів Running | ✅ знімок нижче |
+| `/health` кожного сервісу | ✅ booking, catalog, reviews, aggregator, gateway → Healthy |
+| запити через Gateway до всіх сервісів, у відповіді `X-Correlation-Id` | ✅ 12 маршрутів → 200; невідомий шлях → 404 |
+| пошук у Dashboard за одним CorrelationId знаходить логи всіх сервісів ланцюжка | ✅ gateway, aggregator, booking-api, catalog-api, reviews-api — знімок нижче |
+| trace агрегувального запиту: Gateway → Aggregator → сервіси → БД, SQL- і MongoDB-spans, catalog-api та reviews-api паралельно | ✅ знімок нижче |
+| зупинка reviews-api → часткова відповідь з попередженням, а не 500 | ✅ 200 за ~5 с, `warnings: ["reviews-api is unavailable — …"]` ([`lab05-partial-response.json`](docs/screenshots/lab05-partial-response.json)); після запуску сервісу відповідь знову повна |
+| у сервісах Лаб. 02–04 змінено лише Program.cs (+ посилання на ServiceDefaults, конфіг Serilog) і додано телеметрію бізнес-операцій | ✅ таблиця «Інтеграція сервісів» |
+| логування бізнес-подій і власні spans | ✅ `review.create` → `insert reviews` (MongoDB), `movie.update` → SELECT/UPDATE (SQL) у trace; логи «Створено відгук {ReviewId}…», «Оновлено фільм {MovieId}…» |
+| прямий виклик сервісу в обхід Gateway | ✅ сервіс сам генерує CorrelationId; через Gateway зберігається ідентифікатор клієнта й додається лог маршрутизації |
+| дані переживають перезапуск AppHost (томи) | ✅ `createdAt` клієнта той самий після рестарту, фільмів у Каталозі так само 6 |
+
+Тести агрегатора (8): паралельність, часткова відмова, 404/503, узгодженість, передача CorrelationId:
+
+```bash
+dotnet test --project Platform.Aggregator.Tests
+```
+
+### Знімки екрана (Лаб. 05)
+
+Ресурси в статусі Running:
+
+![Ресурси](docs/screenshots/lab05-dashboard-resources.jpg)
+
+Trace агрегувального запиту — Gateway → Aggregator → booking-api (SQL) → паралельно catalog-api (SQL) і reviews-api (MongoDB):
+
+![Trace](docs/screenshots/lab05-trace-aggregator.jpg)
+
+Structured logs, відфільтровані за `CorrelationId = lab05-demo-0001`:
+
+![Логи за CorrelationId](docs/screenshots/lab05-logs-by-correlationid.jpg)
+
+Властивості запису (ServiceName, EnvironmentName, MachineName, ThreadId, CorrelationId; TraceId і SpanId — у блоці «Контекст»):
+
+![Властивості логу](docs/screenshots/lab05-log-properties.jpg)
+
+Зупинений reviews-api: spans з помилками, а Gateway повертає 200 з частковою відповіддю:
+
+![Часткова відмова](docs/screenshots/lab05-trace-reviews-down.jpg)

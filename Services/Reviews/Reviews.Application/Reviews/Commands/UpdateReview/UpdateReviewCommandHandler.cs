@@ -1,5 +1,7 @@
 using AutoMapper;
 using MediatR;
+using Microsoft.Extensions.Logging;
+using Reviews.Application.Common.Diagnostics;
 using MongoDB.Bson;
 using Reviews.Application.Common.Models;
 using Reviews.Domain.Exceptions;
@@ -8,11 +10,13 @@ using Reviews.Domain.ValueObjects;
 
 namespace Reviews.Application.Reviews.Commands.UpdateReview;
 
-public sealed class UpdateReviewCommandHandler(IReviewRepository reviews, IMapper mapper)
+public sealed class UpdateReviewCommandHandler(IReviewRepository reviews, IMapper mapper, ILogger<UpdateReviewCommandHandler> logger)
     : IRequestHandler<UpdateReviewCommand, ReviewDetailsDto>
 {
     public async Task<ReviewDetailsDto> Handle(UpdateReviewCommand cmd, CancellationToken ct)
     {
+        using var activity = ReviewsTelemetry.Source.StartActivity("review.update");
+        activity?.SetTag("review.id", cmd.Id);
         var id = ObjectId.Parse(cmd.Id);
         var review = await reviews.GetByIdAsync(id, ct) ?? throw NotFoundException.For("Відгук", cmd.Id);
 
@@ -25,6 +29,7 @@ public sealed class UpdateReviewCommandHandler(IReviewRepository reviews, IMappe
 
         // Репозиторій ще раз перевіряє версію атомарно (filter _id + version) — на випадок гонки між читанням і записом
         await reviews.UpdateAsync(review, ct);
+        logger.LogInformation("Відгук {ReviewId} оновлено: оцінка {Rating}, версія {Version}", cmd.Id, review.Rating.Value, review.Version);
         return mapper.Map<ReviewDetailsDto>(review);
     }
 }

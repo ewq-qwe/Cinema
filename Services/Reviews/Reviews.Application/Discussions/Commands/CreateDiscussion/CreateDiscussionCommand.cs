@@ -1,5 +1,7 @@
 using FluentValidation;
 using MediatR;
+using Microsoft.Extensions.Logging;
+using Reviews.Application.Common.Diagnostics;
 using Reviews.Application.Common.Messaging;
 using Reviews.Domain.Entities;
 using Reviews.Domain.Interfaces;
@@ -16,14 +18,18 @@ public sealed record CreateDiscussionCommand(
     string AuthorName,
     IReadOnlyList<string>? Tags = null) : ICommand<string>;
 
-public sealed class CreateDiscussionCommandHandler(IDiscussionRepository discussions)
+public sealed class CreateDiscussionCommandHandler(IDiscussionRepository discussions, ILogger<CreateDiscussionCommandHandler> logger)
     : IRequestHandler<CreateDiscussionCommand, string>
 {
     public async Task<string> Handle(CreateDiscussionCommand cmd, CancellationToken ct)
     {
+        using var activity = ReviewsTelemetry.Source.StartActivity("discussion.create");
+        activity?.SetTag("movie.id", cmd.MovieId);
         var discussion = new Discussion(cmd.MovieId, cmd.MovieTitle, cmd.Title,
             new Author(cmd.AuthorId, cmd.AuthorName), cmd.Tags);
         await discussions.AddAsync(discussion, ct);
+        logger.LogInformation("Створено тему {DiscussionId} фільму {MovieId}, автор {CustomerId}, тегів {TagsCount}",
+            discussion.Id.ToString(), discussion.MovieId, discussion.Author.CustomerId, discussion.Tags.Count);
         return discussion.Id.ToString();
     }
 }

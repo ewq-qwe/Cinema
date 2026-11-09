@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using MongoDB.Driver.Core.Configuration;
+using MongoDB.Driver.Core.Extensions.DiagnosticSources;
 using Reviews.Application.Common.Interfaces;
 using Reviews.Domain.Interfaces;
 using Reviews.Infrastructure.Persistence;
@@ -38,6 +39,8 @@ public static class DependencyInjection
                 sp.GetRequiredService<IOptions<MongoDbOptions>>().Value.ConnectionString);
             // Логи драйвера (категорії MongoDB.*): напр. "MongoDB.Command": "Debug" покаже кожну команду до БД
             settings.LoggingSettings = new LoggingSettings(sp.GetRequiredService<ILoggerFactory>());
+            // Лаб. 05: кожна команда до MongoDB стає span у trace (джерело підключено в ServiceDefaults)
+            settings.ClusterConfigurator = cb => cb.Subscribe(new DiagnosticsActivityEventSubscriber());
             return new MongoClient(settings);
         });
         services.AddSingleton<MongoDbContext>();

@@ -5,17 +5,13 @@ using Reviews.Application.Common.Mapping;
 using Reviews.Infrastructure;
 using Reviews.Infrastructure.Persistence;
 using Reviews.WebApi.Errors;
-using Reviews.WebApi.Logging;
 using Reviews.WebApi.Mapping;
-using Serilog;
+using Platform.ServiceDefaults.Correlation;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ---------- Serilog: розділ "Serilog" в appsettings.json (Console + File, структурований JSON) ----------
-builder.Host.UseSerilog((ctx, cfg) => cfg
-    .ReadFrom.Configuration(ctx.Configuration)
-    .Enrich.FromLogContext()
-    .Enrich.WithProperty("Application", "Reviews.WebApi"));
+// ---------- Лаб. 05: спільні налаштування платформи — Serilog, OpenTelemetry, health checks, service discovery ----------
+builder.AddServiceDefaults();
 
 // ---------- Шари Clean Architecture: кожен реєструє себе власним методом розширення ----------
 builder.Services
@@ -62,8 +58,7 @@ builder.Services.AddSwaggerGen(o =>
 var app = builder.Build();
 
 // ---------- Конвеєр ----------
-app.UseMiddleware<CorrelationIdMiddleware>();          // CorrelationId / RequestPath / UserId у всіх логах запиту
-app.UseSerilogRequestLogging();
+app.UseMiddleware<CorrelationIdMiddleware>();          // CorrelationId у всіх логах запиту + межі запиту (ServiceDefaults)
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
@@ -74,7 +69,7 @@ if (!app.Environment.IsProduction())
 }
 
 app.MapControllers();
-app.MapHealthChecks("/health");
+app.MapDefaultEndpoints();   // /health (разом із перевіркою MongoDB) і /alive
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();
