@@ -64,3 +64,28 @@ public interface IPaymentRepository : IGenericRepository<BookingPayment>
 {
     Task<BookingPayment?> GetByTransactionIdAsync(string transactionId, CancellationToken ct = default);
 }
+
+/// <summary>Лаб. 08: знімок фільму з події Каталогу — те, що зберігає локальна копія dbo.Movies.</summary>
+public sealed record MovieSnapshot(long Id, string Title, int DurationMinutes, string AgeRating, bool IsArchived = false);
+
+/// <summary>
+/// Лаб. 08: локальна копія довідника фільмів (read model), яку оновлюють лише події Каталогу.
+/// Джерело істини — Каталог; тут лише копія для власних запитів (розклад, бронювання).
+/// </summary>
+public interface IMovieCopyRepository
+{
+    /// <summary>Створити або оновити копію. false — подія застаріла (у копії вже новіші дані), нічого не змінено.</summary>
+    Task<bool> UpsertAsync(MovieSnapshot movie, DateTime occurredAt, CancellationToken ct = default);
+
+    /// <summary>Позначити фільм архівним. false — фільму немає в копії або подія застаріла.</summary>
+    Task<bool> ArchiveAsync(long id, DateTime occurredAt, CancellationToken ct = default);
+
+    Task<MovieSnapshot?> GetAsync(long id, CancellationToken ct = default);
+}
+
+/// <summary>Лаб. 08: журнал оброблених подій для ідемпотентності споживача (dbo.ProcessedEvents).</summary>
+public interface IProcessedEventRepository
+{
+    /// <summary>Записати EventId як оброблений. false — подію вже оброблено (дублікат), обробку треба пропустити.</summary>
+    Task<bool> TryAddAsync(Guid eventId, string eventType, CancellationToken ct = default);
+}

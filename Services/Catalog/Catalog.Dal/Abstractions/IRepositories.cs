@@ -47,3 +47,15 @@ public interface IMovieCreditRepository : IGenericRepository<MovieCredit>
     Task<IReadOnlyList<FilmographyEntry>> GetFilmographyAsync(int personId, CancellationToken ct = default);
     Task<IReadOnlyList<Person>> GetLeadActorsAsync(string? genreName, int maxBillingOrder, CancellationToken ct = default);
 }
+
+/// <summary>
+/// Лаб. 08: transactional outbox. Add лише додає запис у контекст — він зберігається тим самим SaveChangesAsync
+/// (однією транзакцією), що й бізнес-зміни.
+/// </summary>
+public interface IIntegrationEventLogRepository
+{
+    void Add(IntegrationEventLog.IntegrationEventLogEntry entry);
+
+    /// <summary>Неопубліковані події, створені не пізніше <paramref name="createdBefore"/>, у порядку виникнення.</summary>
+    Task<IReadOnlyList<IntegrationEventLog.IntegrationEventLogEntry>> GetPendingAsync(DateTime createdBefore, int take, CancellationToken ct = default);
+}

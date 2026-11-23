@@ -2,11 +2,13 @@ using AutoMapper;
 using Catalog.Bll.Caching;
 using Catalog.Bll.Diagnostics;
 using Catalog.Bll.Dtos;
+using Catalog.Bll.IntegrationEvents;
 using Catalog.Bll.Specifications;
 using Catalog.Dal.Abstractions;
 using Catalog.Domain.Entities;
 using Catalog.Domain.Exceptions;
 using Microsoft.Extensions.Logging;
+using Platform.EventBus.Events;
 
 namespace Catalog.Bll.Services;
 
@@ -16,8 +18,16 @@ namespace Catalog.Bll.Services;
 /// для яких потрібні інші дані з БД: існування жанру й людини, унікальність «назва + рік».
 /// Лаб. 06: читання — cache-aside через дворівневий кеш (L1 пам'ять → L2 Redis → БД);
 /// кожен запис синхронно інвалідує картку фільму й усі сторінки списків.
+/// Лаб. 08: зміни полів, які копіюють інші сервіси (назва, тривалість, віковий рейтинг, архівування — політика
+/// дублювання з Лаб. 01), породжують integration events. Подія потрапляє в outbox тією самою транзакцією,
+/// що й зміни фільму, і публікується ЛИШЕ після успішного SaveChanges.
 /// </summary>
-public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ITwoLevelCache cache, ILogger<MovieService> logger) : IMovieService
+public sealed class MovieService(
+    IUnitOfWork uow,
+    IMapper mapper,
+    ITwoLevelCache cache,
+    ICatalogIntegrationEventService events,
+    ILogger<MovieService> logger) : IMovieService
 {
     public async Task<PagedResult<MovieListItemDto>> GetListAsync(MovieQuery query, CancellationToken ct = default)
     {
@@ -49,8 +59,16 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ITwoLevelCache
             throw new ConflictException($"Фільм «{title}» ({input.ReleaseYear}) уже є в каталозі.");
 
         var movie = new Movie(title, input.ReleaseYear, input.DurationMinutes, input.AgeRating, input.GenreId);
-        await uow.Movies.AddAsync(movie, ct);
-        await uow.SaveChangesAsync(ct);
+        // Id фільму генерує БД, а подія має його містити: фільм і запис outbox — в одній явній транзакції
+        await uow.ExecuteInTransactionAsync(async token =>
+        {
+            await uow.Movies.AddAsync(movie, token);
+            await uow.SaveChangesAsync(token);                                       // 1) фільм збережено, відомий Id
+            events.AddEvent(new MovieCreatedEvent(movie.Id, movie.Title, movie.ReleaseYear, movie.DurationMinutes, movie.AgeRating),
+                CatalogEventRoutes.MovieCreated);
+            await uow.SaveChangesAsync(token);                                       // 2) подія в outbox — та сама транзакція
+        }, ct);
+        await events.PublishPendingAsync(ct);                                        // 3) лише після коміту — у брокер
 
         activity?.SetTag("movie.id", movie.Id);
         await cache.BumpVersionAsync(CatalogCacheKeys.MovieListVersion, "MovieCreated", ct);
@@ -72,12 +90,22 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ITwoLevelCache
         if (await uow.Movies.ExistsAsync(title, input.ReleaseYear, exceptId: id, ct))
             throw new ConflictException($"Фільм «{title}» ({input.ReleaseYear}) уже є в каталозі.");
 
+        var (oldTitle, oldDuration, oldAgeRating) = (movie.Title, movie.DurationMinutes, movie.AgeRating);
         movie.SetTitleAndYear(title, input.ReleaseYear);
         movie.ChangeDuration(input.DurationMinutes);
         movie.ChangeAgeRating(input.AgeRating);
         movie.MoveToGenre(input.GenreId);
 
-        await uow.SaveChangesAsync(ct);   // інша RowVersion у БД → ConflictException (409)
+        // Події лише для полів, які копіюють інші сервіси; рік і жанр нікуди не реплікуються — подій немає
+        if (!string.Equals(oldTitle, movie.Title, StringComparison.Ordinal))
+            events.AddEvent(new MovieRenamedEvent(id, oldTitle, movie.Title, movie.DurationMinutes, movie.AgeRating),
+                CatalogEventRoutes.MovieRenamed);
+        if (oldDuration != movie.DurationMinutes || oldAgeRating != movie.AgeRating)
+            events.AddEvent(new MovieScreeningInfoChangedEvent(id, movie.Title, oldDuration, movie.DurationMinutes, oldAgeRating, movie.AgeRating),
+                CatalogEventRoutes.MovieScreeningInfoChanged);
+
+        await uow.SaveChangesAsync(ct);   // фільм + outbox однією транзакцією; інша RowVersion у БД → ConflictException (409), подія не йде
+        await events.PublishPendingAsync(ct);
         await InvalidateAsync(id, "MovieUpdated", ct);
         logger.LogInformation("Оновлено фільм {MovieId} «{Title}» ({ReleaseYear}): {DurationMinutes} хв, рейтинг {AgeRating}, жанр {GenreId}",
             id, movie.Title, movie.ReleaseYear, movie.DurationMinutes, movie.AgeRating, movie.GenreId);
@@ -136,7 +164,9 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ITwoLevelCache
         activity?.SetTag("movie.id", id);
         var movie = await uow.Movies.GetByIdAsync(id, ct) ?? throw EntityNotFoundException.For<Movie>(id);
         movie.Archive();
+        events.AddEvent(new MovieArchivedEvent(id, movie.Title), CatalogEventRoutes.MovieArchived);
         await uow.SaveChangesAsync(ct);
+        await events.PublishPendingAsync(ct);
         await InvalidateAsync(id, "MovieArchived", ct);
         logger.LogInformation("Фільм {MovieId} «{Title}» перенесено в архів, статус {Status}", id, movie.Title, "Archived");
     }

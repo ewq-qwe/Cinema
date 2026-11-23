@@ -3,6 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Catalog.Dal\Catalog.Dal.csproj" />
     <ProjectReference Include="..\Catalog.Domain\Catalog.Domain.csproj" />
+    <!-- Лаб. 08: контракти integration events (MovieRenamedEvent тощо) і маршрути catalog-events -->
+    <ProjectReference Include="..\..\..\Platform.EventBus\Platform.EventBus.csproj" />
   </ItemGroup>
 
   <ItemGroup>

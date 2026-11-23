@@ -25,12 +25,16 @@ public sealed class UnitOfWork : IUnitOfWork
         Sessions = new SessionRepository(_connection, Current);
         Bookings = new BookingRepository(_connection, Current);
         Payments = new PaymentRepository(_connection, Current);
+        Movies = new MovieCopyRepository(_connection, Current);
+        ProcessedEvents = new ProcessedEventRepository(_connection, Current);
     }
 
     public ICustomerRepository Customers { get; }
     public ISessionRepository Sessions { get; }
     public IBookingRepository Bookings { get; }
     public IPaymentRepository Payments { get; }
+    public IMovieCopyRepository Movies { get; }
+    public IProcessedEventRepository ProcessedEvents { get; }
 
     public bool HasActiveTransaction => _transaction is not null;
 

@@ -1,5 +1,6 @@
 using AutoMapper;
 using Catalog.Bll.Dtos;
+using Catalog.Bll.IntegrationEvents;
 using Catalog.Bll.Mapping;
 using Catalog.Bll.Services;
 using Catalog.Bll.Validators;
@@ -22,7 +23,8 @@ public class ServiceAndMappingTests
         uow.Movies.Returns(Substitute.For<IMovieRepository>());
         uow.Genres.Returns(Substitute.For<IGenreRepository>());
         uow.People.Returns(Substitute.For<IGenericRepository<Person>>());
-        return (uow, new MovieService(uow, Mapper(), TestCache.Create(), NullLogger<MovieService>.Instance));
+        return (uow, new MovieService(uow, Mapper(), TestCache.Create(), Substitute.For<ICatalogIntegrationEventService>(),
+            NullLogger<MovieService>.Instance));
     }
 
     [Fact]

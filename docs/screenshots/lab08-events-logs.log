@@ -1,0 +1,85 @@
+# Лаб. 08 — журнал подій (Serilog JSON, logs/*.json; рядки відфільтровано за CorrelationId lab08-*, шаблони з підставленими властивостями)
+
+## catalog-api — outbox і публікація (PUT /api/movies/1, CorrelationId lab08-rename)
+18:50:41.597 [INFO] lab08-rename | Outbox: MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 for movie event movie.renamed, CorrelationId lab08-rename — збережеться разом зі змінами
+18:50:41.602 [INFO] lab08-rename | Outbox: MovieScreeningInfoChangedEvent 79c8f108-ef26-404d-8029-b65b99202ec9 for movie event movie.screening_changed, CorrelationId lab08-rename — збережеться разом зі змінами
+18:50:41.892 [INFO] lab08-rename | Published MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 to catalog-events/movie.renamed, CorrelationId lab08-rename
+18:50:41.903 [INFO] lab08-rename | Published MovieScreeningInfoChangedEvent 79c8f108-ef26-404d-8029-b65b99202ec9 to catalog-events/movie.screening_changed, CorrelationId lab08-rename
+
+## booking-api — старт, обробка, дублікат, накопичені події після перезапуску, некоректний JSON, повтори → DLQ, відновлення
+18:49:01.099 [INFO]  | Applied schema migrations 001_Lab08_CatalogSync
+18:50:41.939 [INFO] lab08-rename | Received MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 from booking.catalog-sync (routing key movie.renamed, retry 0, redelivered False)
+18:50:42.001 [INFO] lab08-rename | Movie copy 1 updated by MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2: title «Карпатський експрес» → «Карпатський експрес. Режисерська версія»
+18:50:42.005 [INFO] lab08-rename | Acked MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 (ack) in 111 ms
+18:50:42.008 [INFO] lab08-rename | Received MovieScreeningInfoChangedEvent 79c8f108-ef26-404d-8029-b65b99202ec9 from booking.catalog-sync (routing key movie.screening_changed, retry 0, redelivered False)
+18:50:42.024 [INFO] lab08-rename | Movie copy 1 updated by MovieScreeningInfoChangedEvent 79c8f108-ef26-404d-8029-b65b99202ec9: duration 118 → 124 хв, rating 12+ → 12+
+18:50:42.024 [INFO] lab08-rename | Acked MovieScreeningInfoChangedEvent 79c8f108-ef26-404d-8029-b65b99202ec9 (ack) in 19 ms
+# (опубліковано вручну через HTTP API з обрізаним тілом — пошкоджений JSON одразу йде в DLQ без повторів)
+18:51:28.201 [ERRO] lab08-duplicate | Message 5e1468cf-8d77-4a03-8595-3336e67e08c2 (MovieRenamedEvent) sent to DLQ booking.catalog-sync.dlq: permanent failure, retries 0, error Некоректний JSON MovieRenamedEvent: Expected end of string, but instead reached end
+# той самий EventId повторно, з повним тілом → дублікат пропущено
+18:52:10.099 [INFO] lab08-duplicate-2 | Received MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 from booking.catalog-sync (routing key movie.renamed, retry 0, redelivered False)
+18:52:10.112 [INFO] lab08-duplicate-2 | Duplicate event MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 for movie 1 skipped (already processed)
+18:52:10.112 [INFO] lab08-duplicate-2 | Acked MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 (duplicate) in 13 ms
+# booking-api був зупинений; 3 зміни тривалості накопичилися в черзі й оброблені одразу після запуску
+18:54:13.959 [INFO] lab08-offline-2 | Received MovieScreeningInfoChangedEvent a0050df8-6ebe-415d-ae0b-cc323eeb2803 from booking.catalog-sync (routing key movie.screening_changed, retry 0, redelivered False)
+18:54:14.092 [INFO] lab08-offline-2 | Movie copy 2 updated by MovieScreeningInfoChangedEvent a0050df8-6ebe-415d-ae0b-cc323eeb2803: duration 104 → 106 хв, rating 12+ → 12+
+18:54:14.107 [INFO] lab08-offline-2 | Acked MovieScreeningInfoChangedEvent a0050df8-6ebe-415d-ae0b-cc323eeb2803 (ack) in 240 ms
+18:54:14.111 [INFO] lab08-offline-3 | Received MovieScreeningInfoChangedEvent 620263e1-a12b-42e9-87dd-a2b973413b80 from booking.catalog-sync (routing key movie.screening_changed, retry 0, redelivered False)
+18:54:14.125 [INFO] lab08-offline-3 | Movie copy 3 updated by MovieScreeningInfoChangedEvent 620263e1-a12b-42e9-87dd-a2b973413b80: duration 92 → 95 хв, rating 0+ → 0+
+18:54:14.125 [INFO] lab08-offline-3 | Acked MovieScreeningInfoChangedEvent 620263e1-a12b-42e9-87dd-a2b973413b80 (ack) in 14 ms
+18:54:14.126 [INFO] lab08-offline-6 | Received MovieScreeningInfoChangedEvent bdbfa15c-debe-4299-bc4a-c5a1b6a3a7ef from booking.catalog-sync (routing key movie.screening_changed, retry 0, redelivered False)
+18:54:14.142 [INFO] lab08-offline-6 | Movie copy 6 updated by MovieScreeningInfoChangedEvent bdbfa15c-debe-4299-bc4a-c5a1b6a3a7ef: duration 88 → 90 хв, rating 6+ → 6+
+18:54:14.143 [INFO] lab08-offline-6 | Acked MovieScreeningInfoChangedEvent bdbfa15c-debe-4299-bc4a-c5a1b6a3a7ef (ack) in 16 ms
+# некоректний JSON, надісланий через Management UI → DLQ
+18:55:03.406 [ERRO] lab08-bad-json | Message 11111111-2222-3333-4444-555555555555 (MovieRenamedEvent) sent to DLQ booking.catalog-sync.dlq: permanent failure, retries 0, error Некоректний JSON MovieRenamedEvent: Expected depth to be zero at the end of the JSON
+# SQL Server зупинено; затримки ще 1/2/4 с — повтори вичерпуються до повернення БД → DLQ (тому затримки змінено на 2/10/30 с)
+18:56:24.469 [INFO] lab08-retry | Received MovieScreeningInfoChangedEvent afc08e46-4b36-478b-8534-e6fdcb6fcbb2 from booking.catalog-sync (routing key booking.catalog-sync, retry 0, redelivered False)
+18:56:28.797 [WARN] lab08-retry | Message afc08e46-4b36-478b-8534-e6fdcb6fcbb2 (MovieScreeningInfoChangedEvent) retry 1/3 in 1000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласования. В
+18:56:29.826 [INFO] lab08-retry | Received MovieScreeningInfoChangedEvent afc08e46-4b36-478b-8534-e6fdcb6fcbb2 from booking.catalog-sync (routing key booking.catalog-sync, retry 1, redelivered False)
+18:56:29.827 [WARN] lab08-retry | Message afc08e46-4b36-478b-8534-e6fdcb6fcbb2 (MovieScreeningInfoChangedEvent) retry 2/3 in 2000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласования. В
+18:56:31.846 [INFO] lab08-retry | Received MovieScreeningInfoChangedEvent afc08e46-4b36-478b-8534-e6fdcb6fcbb2 from booking.catalog-sync (routing key booking.catalog-sync, retry 2, redelivered False)
+18:56:31.847 [WARN] lab08-retry | Message afc08e46-4b36-478b-8534-e6fdcb6fcbb2 (MovieScreeningInfoChangedEvent) retry 3/3 in 4000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласования. В
+18:56:35.857 [INFO] lab08-retry | Received MovieScreeningInfoChangedEvent afc08e46-4b36-478b-8534-e6fdcb6fcbb2 from booking.catalog-sync (routing key booking.catalog-sync, retry 3, redelivered False)
+18:56:50.235 [ERRO] lab08-retry | Message afc08e46-4b36-478b-8534-e6fdcb6fcbb2 (MovieScreeningInfoChangedEvent) sent to DLQ booking.catalog-sync.dlq: retries exhausted (3/3), retries 3, error Истекло время ожидания соединения. Время ожидания истекло при попытк
+18:57:11.507 [INFO] lab08-recover | Received MovieScreeningInfoChangedEvent 7c6c73d5-6560-4aef-aac3-031bb1447d00 from booking.catalog-sync (routing key booking.catalog-sync, retry 0, redelivered False)
+18:57:15.273 [WARN] lab08-recover | Message 7c6c73d5-6560-4aef-aac3-031bb1447d00 (MovieScreeningInfoChangedEvent) retry 1/3 in 1000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласования.
+18:57:16.289 [INFO] lab08-recover | Received MovieScreeningInfoChangedEvent 7c6c73d5-6560-4aef-aac3-031bb1447d00 from booking.catalog-sync (routing key booking.catalog-sync, retry 1, redelivered False)
+18:57:16.291 [WARN] lab08-recover | Message 7c6c73d5-6560-4aef-aac3-031bb1447d00 (MovieScreeningInfoChangedEvent) retry 2/3 in 2000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласования.
+18:57:18.304 [INFO] lab08-recover | Received MovieScreeningInfoChangedEvent 7c6c73d5-6560-4aef-aac3-031bb1447d00 from booking.catalog-sync (routing key booking.catalog-sync, retry 2, redelivered False)
+18:57:18.305 [WARN] lab08-recover | Message 7c6c73d5-6560-4aef-aac3-031bb1447d00 (MovieScreeningInfoChangedEvent) retry 3/3 in 4000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласования.
+18:57:22.320 [INFO] lab08-recover | Received MovieScreeningInfoChangedEvent 7c6c73d5-6560-4aef-aac3-031bb1447d00 from booking.catalog-sync (routing key booking.catalog-sync, retry 3, redelivered False)
+18:57:22.322 [ERRO] lab08-recover | Message 7c6c73d5-6560-4aef-aac3-031bb1447d00 (MovieScreeningInfoChangedEvent) sent to DLQ booking.catalog-sync.dlq: retries exhausted (3/3), retries 3, error Истекло время ожидания соединения. Время ожидания истекло при попы
+# затримки 2/10/30 с; SQL запущено вручну повз Aspire і він ще завантажувався на останній спробі → DLQ
+18:59:43.639 [INFO] lab08-recover-2 | Received MovieScreeningInfoChangedEvent 6064cc24-29dd-4d42-88de-cad81deee77e from booking.catalog-sync (routing key booking.catalog-sync, retry 0, redelivered False)
+18:59:58.713 [WARN] lab08-recover-2 | Message 6064cc24-29dd-4d42-88de-cad81deee77e (MovieScreeningInfoChangedEvent) retry 1/3 in 2000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласовани
+19:00:00.749 [INFO] lab08-recover-2 | Received MovieScreeningInfoChangedEvent 6064cc24-29dd-4d42-88de-cad81deee77e from booking.catalog-sync (routing key booking.catalog-sync, retry 1, redelivered False)
+19:00:00.751 [WARN] lab08-recover-2 | Message 6064cc24-29dd-4d42-88de-cad81deee77e (MovieScreeningInfoChangedEvent) retry 2/3 in 10000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласован
+19:00:10.758 [INFO] lab08-recover-2 | Received MovieScreeningInfoChangedEvent 6064cc24-29dd-4d42-88de-cad81deee77e from booking.catalog-sync (routing key booking.catalog-sync, retry 2, redelivered False)
+19:00:19.625 [WARN] lab08-recover-2 | Message 6064cc24-29dd-4d42-88de-cad81deee77e (MovieScreeningInfoChangedEvent) retry 3/3 in 30000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласован
+19:00:49.644 [INFO] lab08-recover-2 | Received MovieScreeningInfoChangedEvent 6064cc24-29dd-4d42-88de-cad81deee77e from booking.catalog-sync (routing key booking.catalog-sync, retry 3, redelivered False)
+19:00:49.647 [ERRO] lab08-recover-2 | Message 6064cc24-29dd-4d42-88de-cad81deee77e (MovieScreeningInfoChangedEvent) sent to DLQ booking.catalog-sync.dlq: retries exhausted (3/3), retries 3, error Подключение к серверу успешно установлено, но затем произошла ош
+19:08:57.706 [INFO] lab08-recover-3 | Received MovieScreeningInfoChangedEvent 07229ee5-05be-4a3a-a1d0-b80b140ac830 from booking.catalog-sync (routing key booking.catalog-sync, retry 0, redelivered False)
+19:08:57.758 [INFO] lab08-recover-3 | Movie copy 4 updated by MovieScreeningInfoChangedEvent 07229ee5-05be-4a3a-a1d0-b80b140ac830: duration 131 → 134 хв, rating 16+ → 16+
+19:08:57.758 [INFO] lab08-recover-3 | Acked MovieScreeningInfoChangedEvent 07229ee5-05be-4a3a-a1d0-b80b140ac830 (ack) in 52 ms
+# SQL Server зупинено → повтори → SQL запущено з Dashboard → спроба 3 успішна
+19:09:14.649 [INFO] lab08-recover-4 | Received MovieScreeningInfoChangedEvent 40fcbb86-2492-4a4b-82c0-6aaffdb0387c from booking.catalog-sync (routing key booking.catalog-sync, retry 0, redelivered False)
+19:09:16.945 [WARN] lab08-recover-4 | Message 40fcbb86-2492-4a4b-82c0-6aaffdb0387c (MovieScreeningInfoChangedEvent) retry 1/3 in 2000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласовани
+19:09:18.953 [INFO] lab08-recover-4 | Received MovieScreeningInfoChangedEvent 40fcbb86-2492-4a4b-82c0-6aaffdb0387c from booking.catalog-sync (routing key booking.catalog-sync, retry 1, redelivered False)
+19:09:18.954 [WARN] lab08-recover-4 | Message 40fcbb86-2492-4a4b-82c0-6aaffdb0387c (MovieScreeningInfoChangedEvent) retry 2/3 in 10000 ms: Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласован
+19:09:28.960 [INFO] lab08-recover-4 | Received MovieScreeningInfoChangedEvent 40fcbb86-2492-4a4b-82c0-6aaffdb0387c from booking.catalog-sync (routing key booking.catalog-sync, retry 2, redelivered False)
+19:09:30.313 [WARN] lab08-recover-4 | Message 40fcbb86-2492-4a4b-82c0-6aaffdb0387c (MovieScreeningInfoChangedEvent) retry 3/3 in 30000 ms: Подключение к серверу успешно установлено, но затем произошла ошибка в процессе подтверждения, предшествующего входу. (pr
+19:10:00.325 [INFO] lab08-recover-4 | Received MovieScreeningInfoChangedEvent 40fcbb86-2492-4a4b-82c0-6aaffdb0387c from booking.catalog-sync (routing key booking.catalog-sync, retry 3, redelivered False)
+19:10:00.359 [INFO] lab08-recover-4 | Movie copy 4 updated by MovieScreeningInfoChangedEvent 40fcbb86-2492-4a4b-82c0-6aaffdb0387c: duration 134 → 131 хв, rating 16+ → 16+
+19:10:00.359 [INFO] lab08-recover-4 | Acked MovieScreeningInfoChangedEvent 40fcbb86-2492-4a4b-82c0-6aaffdb0387c (ack) in 34 ms
+
+## reviews-api — перейменування в усіх відгуках, дублікат, некоректний JSON
+18:50:41.922 [INFO] lab08-rename | Received MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 from reviews.catalog-sync (routing key movie.renamed, retry 0, redelivered False)
+18:50:42.182 [INFO] lab08-rename | Movie 1 renamed to «Карпатський експрес. Режисерська версія» by MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2: 2 reviews, 1 discussions updated
+18:50:42.187 [INFO] lab08-rename | Acked MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 (ack) in 291 ms
+# (опубліковано вручну через HTTP API з обрізаним тілом — пошкоджений JSON одразу йде в DLQ без повторів)
+18:51:28.202 [ERRO] lab08-duplicate | Message 5e1468cf-8d77-4a03-8595-3336e67e08c2 (MovieRenamedEvent) sent to DLQ reviews.catalog-sync.dlq: permanent failure, retries 0, error Некоректний JSON MovieRenamedEvent: Expected end of string, but instead reached end
+# той самий EventId повторно, з повним тілом → дублікат пропущено
+18:52:10.099 [INFO] lab08-duplicate-2 | Received MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 from reviews.catalog-sync (routing key movie.renamed, retry 0, redelivered False)
+18:52:10.108 [INFO] lab08-duplicate-2 | Duplicate event MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 for movie 1 skipped (already processed)
+18:52:10.109 [INFO] lab08-duplicate-2 | Acked MovieRenamedEvent 5e1468cf-8d77-4a03-8595-3336e67e08c2 (duplicate) in 9 ms
+

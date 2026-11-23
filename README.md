@@ -6,7 +6,7 @@
 * **Лаб. 04** — мікросервіс «Відгуки» на MongoDB за Clean Architecture: CQRS + MediatR, Value Objects, Pipeline Behaviors, BsonClassMap, індекси й сідінг: розділ «Лаб. 04».
 * **Лаб. 05** — усі три сервіси в одній платформі .NET Aspire: ServiceDefaults (Serilog + OpenTelemetry + CorrelationId), API Gateway на YARP, Aggregator: розділ «Лаб. 05».
 * **Лаб. 06** — gRPC між Aggregator і сервісами, дворівневий кеш (IMemoryCache + Redis), кеш агрегованих відповідей, метрики кешу: розділ «Лаб. 06».
-* **Лаб. 07** — resilience-політики Polly за критичністю сервісів, retry gRPC-каналу, бізнес-метрики, liveness / readiness health checks (SQL Server, MongoDB, Redis, gRPC Health Protocol): розділ «Лаб. 07» в кінці файлу.
+* **Лаб. 07** — resilience-політики Polly за критичністю сервісів, retry gRPC-каналу, бізнес-метрики, liveness / readiness health checks (SQL Server, MongoDB, Redis, gRPC Health Protocol): розділ «Лаб. 07».
 
 **Домен.** Кінотеатр «Кадр» (вигаданий, 2 зали) продає квитки онлайн. Глядачі дивляться афішу, бронюють і оплачують місця на сеанс, а після перегляду пишуть відгуки й обговорюють фільми. Адміністратор веде каталог фільмів і розклад.
 
@@ -41,13 +41,13 @@ db/
     └── queries.js         запити й агрегації
 scripts/deploy.ps1         розгортання всіх трьох БД однією командою
 Platform.slnx              одне рішення на всю платформу
-Platform.AppHost/          оркестрація .NET Aspire (AppHost.cs): SQL Server, MongoDB і Redis з томами, сервіси, Aggregator, Gateway
+Platform.AppHost/          оркестрація .NET Aspire (AppHost.cs): SQL Server, MongoDB, Redis і RabbitMQ з томами, сервіси, Aggregator, Gateway
 Platform.ServiceDefaults/  спільні налаштування (Лаб. 05): Serilog, OpenTelemetry, CorrelationId, health checks, service discovery
-Platform.ApiGateway/       API Gateway на YARP — єдина точка входу (http://localhost:5000)
+Platform.EventBus/         шина подій (Лаб. 08): RabbitMQ — підключення, топологія, publisher, базовий consumer, контракти подій (+ Platform.EventBus.Tests) — єдина точка входу (http://localhost:5000)
 Platform.Aggregator/       Aggregator Pattern: gRPC-клієнти трьох сервісів, кеш агрегатів у Redis, Resilience/ (Polly), HealthChecks/, Metrics/ (+ Platform.Aggregator.Tests)
-Services/Booking/          мікросервіс «Бронювання» (Проєкт №1, Лаб. 02): Booking.Api (+ Protos/, Grpc/, Metrics/, HealthChecks/) · Booking.Bll · Booking.Dal · Booking.Domain · Booking.Tests
-Services/Catalog/          мікросервіс «Каталог» (Проєкт №2, Лаб. 03): Catalog.Api (+ Dockerfile, Protos/, Grpc/, Metrics/, HealthChecks/) · Catalog.Bll (+ Caching/) · Catalog.Dal · Catalog.Domain · Catalog.Tests
-Services/Reviews/          мікросервіс «Відгуки» (Проєкт №3, Лаб. 04): Reviews.Domain · Reviews.Application (+ Common/Caching/) · Reviews.Infrastructure · Reviews.WebApi (+ Protos/, Grpc/, Metrics/, HealthChecks/) · Reviews.Tests
+Services/Booking/          мікросервіс «Бронювання» (Проєкт №1, Лаб. 02): Booking.Api (+ Protos/, Grpc/, Metrics/, HealthChecks/, IntegrationEvents/) · Booking.Bll · Booking.Dal (+ Migrations/) · Booking.Domain · Booking.Tests
+Services/Catalog/          мікросервіс «Каталог» (Проєкт №2, Лаб. 03): Catalog.Api (+ Dockerfile, Protos/, Grpc/, Metrics/, HealthChecks/, IntegrationEvents/) · Catalog.Bll (+ Caching/, IntegrationEvents/) · Catalog.Dal (+ IntegrationEventLog/) · Catalog.Domain · Catalog.Tests
+Services/Reviews/          мікросервіс «Відгуки» (Проєкт №3, Лаб. 04): Reviews.Domain · Reviews.Application (+ Common/Caching/) · Reviews.Infrastructure · Reviews.WebApi (+ Protos/, Grpc/, Metrics/, HealthChecks/, IntegrationEvents/) · Reviews.Tests
 ```
 
 | Артефакт | Файл |
@@ -1149,3 +1149,248 @@ Trace агрегувального запиту з gRPC-spans клієнта й 
 ![Події Polly](docs/screenshots/lab07-metrics-polly-events.jpg)
 
 Логи resilience-подій: [`lab07-resilience-logs.log`](docs/screenshots/lab07-resilience-logs.log). Liveness проти readiness: [`lab07-health-live-vs-ready.txt`](docs/screenshots/lab07-health-live-vs-ready.txt).
+
+## Лаб. 08 — подієва архітектура з RabbitMQ
+
+У Лаб. 01 для дубльованих полів записано політику «копія, оновлюється подіями з Каталогу». Тут цей механізм реалізовано:
+- **Каталог** публікує integration events про зміни фільму;
+- **Бронювання** оновлює локальний довідник `dbo.Movies`, але не знімки в бронюваннях (`Bookings.MovieTitle`) і не ціни квитків;
+- **Відгуки** оновлюють `movieTitle` в усіх відгуках і обговореннях фільму.
+
+```mermaid
+flowchart LR
+    C["catalog-api<br/>MovieService"] -- "SaveChanges:<br/>Movies + IntegrationEventLog" --> CDB[("CinemaCatalog")]
+    C -- "publish (confirm)" --> X{{"catalog-events<br/>topic"}}
+    O["OutboxPublisherService"] -. "дошле неопубліковані" .-> X
+    X -- "movie.*" --> QB["booking.catalog-sync"]
+    X -- "movie.renamed" --> QR["reviews.catalog-sync"]
+    QB --> B["booking-api<br/>CatalogEventsConsumer"] --> BDB[("CinemaBooking<br/>Movies + ProcessedEvents")]
+    QR --> R["reviews-api<br/>CatalogEventsConsumer"] --> RDB[("cinema_reviews<br/>reviews, discussions, processedEvents")]
+    QB -. "nack / вичерпано повтори" .-> DLX{{"catalog-events.dlx<br/>direct"}}
+    QR -.-> DLX
+    DLX --> DB1["booking.catalog-sync.dlq"]
+    DLX --> DR1["reviews.catalog-sync.dlq"]
+```
+
+### Брокер і підключення
+
+- **AppHost:** `AddRabbitMQ("messaging").WithDataVolume("cinema-rabbitmq-data").WithManagementPlugin(port: 15672)`.
+  - catalog-api, booking-api і reviews-api отримують `.WithReference(rabbit).WaitFor(rabbit)`.
+  - Облікові дані генерує Aspire.
+  - Management UI: http://localhost:15672, логін і пароль — у Dashboard, ресурс `messaging` → Parameters.
+- **Сервіси:**
+  - `builder.AddRabbitMQClient("messaging", s => s.DisableTracing = true)` у `Program.cs` кожного сервісу. Це пакет `Aspire.RabbitMQ.Client`: один `IConnection` на застосунок і health check.
+  - Канали `IChannel` створюються окремо під операції. Використовується `RabbitMQ.Client` 7.2.2 з асинхронним API (`BasicPublishAsync`, `BasicConsumeAsync`, `BasicAckAsync`).
+  - Вбудоване трасування клієнта вимкнено, бо контекст передається вручну (див. нижче).
+- **[`Platform.EventBus`](Platform.EventBus)** — спільна бібліотека шини:
+
+  | Тека | Що там |
+  |---|---|
+  | `Abstractions/` | `IntegrationEvent`, `IEventPublisher`, `IIntegrationEventHandler<T>`, `NonRetryableEventException`, імена заголовків |
+  | `Events/` | контракти подій Каталогу та ключі маршрутизації |
+  | `Topology/` | декларативна топологія |
+  | `Publishing/` | `RabbitMqEventPublisher` |
+  | `Consuming/` | базовий `RabbitMqConsumer` (BackgroundService) і `MessageContext` |
+  | `Diagnostics/` | `TracePropagation`, `MessagingMetrics` |
+  | `Serialization/` | `EventJson` |
+
+### Топологія
+
+Топологію оголошують у коді під час старту: publisher — свій exchange, consumer — свою чергу. Повторне оголошення безпечне.
+
+| Exchange / черга | Тип | Bindings / аргументи |
+|---|---|---|
+| `catalog-events` | topic, durable | — |
+| `booking.catalog-sync` | durable | `movie.*` (усі події фільмів); `x-dead-letter-exchange = catalog-events.dlx`, `x-dead-letter-routing-key = booking.catalog-sync` |
+| `reviews.catalog-sync` | durable | лише `movie.renamed`: Відгукам потрібна тільки назва, решту відсіює сам topic exchange |
+| `catalog-events.dlx` | direct, durable | — |
+| `booking.catalog-sync.dlq`, `reviews.catalog-sync.dlq` | durable | прив'язані до DLX ключем = назва основної черги |
+
+DLX має тип **direct**, а не fanout. З fanout-DLX кожна DLQ отримувала б невдалі повідомлення всіх черг, а так кожен сервіс бачить у своїй DLQ лише свої.
+
+Кілька екземплярів одного сервісу читають одну чергу як competing consumers. Різні сервіси мають різні черги, тож кожен отримує подію незалежно (fan-out).
+
+### Події
+
+Контракти: [`Platform.EventBus/Events/CatalogEvents.cs`](Platform.EventBus/Events/CatalogEvents.cs).
+
+**Базовий тип** `IntegrationEvent` — record, тобто незмінний (лише `init`) і з порівнянням за значенням. Поля:
+- `EventId` (Guid) — ключ ідемпотентності й `MessageId`;
+- `OccurredAt` — час бізнес-факту;
+- `CorrelationId` — з Лаб. 05;
+- `SchemaVersion`.
+
+| Подія | Ключ | Коли | Хто споживає |
+|---|---|---|---|
+| `MovieCreatedEvent` | `movie.created` | новий фільм | Бронювання: новий рядок `Movies` |
+| `MovieRenamedEvent` | `movie.renamed` | змінилась назва | Бронювання: `Movies.Title`; Відгуки: `movieTitle` у `reviews` і `discussions` |
+| `MovieScreeningInfoChangedEvent` | `movie.screening_changed` | тривалість / віковий рейтинг (аналог `ProductPriceChanged` з eShop) | Бронювання: `Movies.DurationMinutes`, `AgeRating` |
+| `MovieArchivedEvent` | `movie.archived` | фільм у архіві (м'яке видалення) | Бронювання: `Movies.IsArchived = 1`, нові сеанси заборонені |
+
+**Події самодостатні:** кожна несе повний знімок полів, які копіює споживач. Тому Бронювання може створити копію навіть фільму, про який ще не чуло, і не звертається до Каталогу.
+
+**Формат повідомлення:**
+- JSON (System.Text.Json, camelCase, кирилиця без `\uXXXX`).
+- `BasicProperties`:
+  - `Persistent = true`;
+  - `ContentType = application/json`;
+  - `MessageId = EventId`;
+  - `Type` = ім'я класу події;
+  - `CorrelationId`, `Timestamp`, `AppId`.
+- Заголовки:
+  - `x-correlation-id`, `x-schema-version`, `x-occurred-at`, `x-source`;
+  - `traceparent` / `tracestate` для трасування;
+  - `x-retry-count` і `x-last-error` — при повторах.
+- Нові поля можна лише додавати: споживач ігнорує невідомі (`UnmappedMemberHandling.Skip`), а наявні поля не перейменовуються.
+
+### Публікація після збереження (Transactional Outbox)
+
+[`MovieService`](Services/Catalog/Catalog.Bll/Services/MovieService.cs) → [`ICatalogIntegrationEventService`](Services/Catalog/Catalog.Bll/IntegrationEvents/ICatalogIntegrationEventService.cs) → [`Catalog.Api/IntegrationEvents`](Services/Catalog/Catalog.Api/IntegrationEvents):
+
+1. `events.AddEvent(...)` — подія записується в таблицю `IntegrationEventLog` (міграція `Lab08_IntegrationEventLog`) **тим самим** Unit of Work.
+2. `uow.SaveChangesAsync()` — зміни фільму й запис outbox фіксуються **однією транзакцією**. Для нового фільму, де Id генерує БД, використовується `ExecuteInTransactionAsync`: фільм, потім подія з його Id, потім коміт.
+3. `events.PublishPendingAsync()` — **лише після** успішного збереження подія публікується в канал із publisher confirms, і запис позначається `Published`.
+
+Що відбувається при збоях:
+- **Не вдалося зберегти** (наприклад, 409 через RowVersion): виняток перериває операцію, і події немає ні в БД, ні в брокері.
+- **Брокер недоступний або застосунок упав між комітом і публікацією:** подія лишається `NotPublished`. [`OutboxPublisherService`](Services/Catalog/Catalog.Api/IntegrationEvents/OutboxPublisherService.cs) раз на 5 с публікує такі події з тим самим `EventId` і збереженим `traceparent`. Подія не губиться, а дублікати відсікають ідемпотентні споживачі.
+
+### Споживачі
+
+[`RabbitMqConsumer`](Platform.EventBus/Consuming/RabbitMqConsumer.cs) — базовий `BackgroundService`. Сервіси мають свої підкласи `CatalogEventsConsumer` в `…/IntegrationEvents/`.
+
+Під час старту:
+- канал;
+- оголошення топології;
+- `BasicQos(prefetch 10)`;
+- `AsyncEventingBasicConsumer`;
+- `BasicConsumeAsync(autoAck: false)`.
+
+Зупинка: `BasicCancel`, потім очікування повідомлень в обробці, потім закриття каналів. Непідтверджені повідомлення брокер поверне в чергу.
+
+Обробка одного повідомлення:
+1. Відновлюється контекст трасування, створюється Activity типу `Consumer` і log scope з `EventId`, `EventType`, `CorrelationId` та чергою.
+2. Тип події визначається за `BasicProperties.Type`, далі десеріалізація.
+3. Окремий обробник на кожен тип (`IIntegrationEventHandler<T>`, Scoped, у власному scope повідомлення).
+4. Рішення щодо повідомлення:
+
+| Результат | Дія |
+|---|---|
+| успіх або дублікат | `BasicAckAsync` |
+| некоректний JSON, невідомий тип, невалідні дані, порушення обмежень БД (`NonRetryableEventException`) | одразу `BasicNackAsync(requeue: false)` → DLX → DLQ |
+| тимчасовий збій (БД недоступна, таймаут) | копія з `x-retry-count + 1` публікується через default exchange прямо у **свою** чергу, оригінал підтверджується після confirm копії. Затримки 2 / 10 / 30 с, максимум 3 повтори, потім DLQ |
+
+**Чому не `requeue: true`:** повернене повідомлення приходить без змін, бо заголовки змінити не можна. Лічильник би не зростав, і повтори йшли б нескінченно й без пауз.
+
+**Чому копія йде не у вихідний exchange:** звідти вона потрапила б і в черги інших сервісів.
+
+**Чому затримки саме 2 / 10 / 30 с.** Спершу були 1 / 2 / 4 с, і на стенді всі три повтори вичерпувалися ще до того, як перезапущений SQL Server знову приймав з'єднання. Причини:
+- рестарт SQL Server триває 10–20 с;
+- SqlClient після невдалого з'єднання кілька секунд одразу відхиляє нові (blocking period пулу).
+
+Вікно ~40 с переживає перезапуск БД. Затримка тримає лише цей споживач, черга при цьому не губить повідомлень.
+
+### Ідемпотентність і реплікація
+
+**Бронювання** ([`MovieCopyHandlers.cs`](Services/Booking/Booking.Api/IntegrationEvents/MovieCopyHandlers.cs)). Міграція [`001_Lab08_CatalogSync.sql`](Services/Booking/Booking.Dal/Migrations/001_Lab08_CatalogSync.sql) застосовується під час старту через `SchemaMigrator` з історією в `dbo.SchemaMigrations`.
+
+Обробник працює в одній транзакції Unit of Work:
+1. `INSERT dbo.ProcessedEvents (EventId PK)` з `UPDLOCK, HOLDLOCK`. Якщо рядок уже є — це дублікат: rollback і пропуск.
+2. `MERGE dbo.Movies` з умовою `CatalogUpdatedAt <= @OccurredAt`. Застаріла подія, що прийшла пізніше (out-of-order), не перезаписує новіші дані.
+3. Commit — обидва записи разом.
+
+Не змінюються:
+- `Bookings.MovieTitle` — знімок на квитку;
+- `Tickets.Price` (як `OrderItems.UnitPrice` в eShop).
+
+**Відгуки** ([`SyncMovieTitleCommand`](Services/Reviews/Reviews.Application/Movies/Commands/SyncMovieTitle/SyncMovieTitleCommand.cs)). Споживач перетворює подію на команду MediatR, тож вона проходить той самий pipeline, що й HTTP-команди.
+
+Контейнер MongoDB в Aspire — standalone `mongod`, а багатодокументні транзакції потребують replica set. Тому ідемпотентним зроблено кожен крок окремо:
+1. `processedEvents` (`_id = EventId`, TTL 30 днів) — якщо EventId є, це дублікат;
+2. `catalogMovies` — умовний upsert за часом події (захист від out-of-order);
+3. `updateMany { movieId } $set movieTitle` у `reviews` і `discussions` — повторне виконання дає той самий стан;
+4. інвалідація кешу: картки відгуків, рейтинг, версія списків;
+5. запис EventId.
+
+Падіння між кроками 3 і 5 призведе лише до повторення кроку 3 з тим самим результатом.
+
+### Трасування через брокер
+
+[`TracePropagation`](Platform.EventBus/Diagnostics/TracePropagation.cs), ActivitySource `Platform.Messaging` (підключено в ServiceDefaults через `AddSource`):
+- **Публікація:** span `catalog-events publish` (Producer). Пропагатор OpenTelemetry записує W3C `traceparent` і `tracestate`, а також baggage в заголовки.
+- **Outbox:** span будується від збереженого `traceparent` операції, що створила подію.
+- **Споживач:** `Extract` із заголовків (значення приходять як `byte[]`), потім Activity `<черга> process` (Consumer) з тегами `messaging.system`, `messaging.destination.name`, `messaging.message.id`, `messaging.rabbitmq.destination.routing_key`, `event.type`, `correlation.id`.
+- SQL- і Mongo-spans обробника стають його нащадками.
+
+Підсумок — один trace: `PUT /api/movies/{id}` → `movie.update` → SQL → `catalog-events publish` → `booking.catalog-sync process` → SQL та `reviews.catalog-sync process` → MongoDB.
+
+### Метрики й логи
+
+**Метрики:** Meter `Platform.Messaging`.
+- `messaging.published` з тегами `event.type`, `result`;
+- `messaging.consumed` з тегом `result` = `ack | duplicate | retry | dead_letter`;
+- `messaging.process.duration`;
+- gauge **`messaging.dlq.depth`** — глибина DLQ кожного споживача, оновлюється раз на 15 с. Якщо DLQ не порожня, додатково пишеться Warning у лог.
+
+**Логи** структуровані:
+- `Published {EventType} {EventId} to {Exchange}/{RoutingKey}, CorrelationId {CorrelationId}`;
+- `Received …`, `Acked … ({Result})`;
+- `Duplicate event {EventType} {EventId} for movie {MovieId} skipped`;
+- `Movie copy {MovieId} updated by {EventType} {EventId}: {Change}`;
+- `Message {EventId} ({EventType}) retry {Attempt}/{MaxRetries} in {DelayMs} ms: {Reason}` (Warning, зі stack trace);
+- `Message {EventId} … sent to DLQ {DeadLetterQueue}: {DeadLetterReason}` (Error).
+
+Кожен запис обробки має в scope `EventId`, `EventType`, `CorrelationId`, `MessagingQueue` і `RetryCount`, тож у Dashboard логи фільтруються за `CorrelationId`.
+
+### Самоперевірка з умови
+
+Сценарії виконано на запущеній платформі. Логи всіх сценаріїв: [`lab08-events-logs.log`](docs/screenshots/lab08-events-logs.log). Тривалість фільму — наш аналог «ціни товару».
+
+| Перевірка | Результат |
+|---|---|
+| змінити «ціну» (тривалість) і назву в Каталозі | ✅ `PUT /api/movies/1`: назва «Карпатський експрес» → «… Режисерська версія», 118 → 124 хв. Подій дві: `MovieRenamedEvent` і `MovieScreeningInfoChangedEvent`. Обидві в outbox (`State = 1`, `CorrelationId lab08-rename`, `TraceParent` збережено). Менш ніж за секунду після запиту (~0,1 с після публікації) копія `dbo.Movies` у Бронюванні має нову назву і 124 хв (`CatalogUpdatedAt` = час події) |
+| ціни / знімки в оформлених бронюваннях не змінюються | ✅ `Bookings.MovieTitle` в усіх 7 бронюваннях фільму лишився «Карпатський експрес» (знімок на квитку) |
+| нова назва в усіх відгуках | ✅ reviews-api: `Movie 1 renamed … : 2 reviews, 1 discussions updated`; API повертає нову `movieTitle` |
+| та сама подія двічі (той самий EventId) | ✅ `Duplicate event MovieRenamedEvent 5e1468cf… skipped` і `Acked … (duplicate)` в обох сервісах. `ProcessedEvents` — так само 2 рядки, `SyncedAt` копії не змінився |
+| зупинити booking-api, змінити кілька цін, запустити | ✅ 3 зміни тривалості (фільми 2, 3, 6) чекали в `booking.catalog-sync`: Ready 3, consumers 0 (знімок). Після запуску всі оброблено за ~0,2 с |
+| некоректний JSON через Management UI → DLQ | ✅ `Message 1111… sent to DLQ booking.catalog-sync.dlq: permanent failure, retries 0`. У DLQ видно `x-death` (reason `rejected`, queue `booking.catalog-sync`) |
+| зупинка SQL Server на час обробки → повтори в логах | ✅ `retry 1/3 in 2000 ms`, `retry 2/3 in 10000 ms`, `retry 3/3 in 30000 ms` (Warning з причиною). Після запуску SQL третя спроба успішна (`Movie copy 4 updated … 134 → 131 хв`). Якщо БД не повертається, після 3 спроб — `retries exhausted (3/3)` → DLQ |
+| наскрізний trace | ✅ один trace (8 ресурсів, 36 spans): `PUT /api/movies/{id}` → `movie.update` → `INSERT IntegrationEventLog` → `catalog-events` (publish) → `booking.catalog-sync` (process) → `INSERT … ProcessedEvents` / `MERGE Movies`, а паралельно `reviews.catalog-sync` → `movie.sync-title` → MongoDB |
+| durable / persistent | ✅ після повного перезапуску платформи DLQ зберегли повідомлення (том `cinema-rabbitmq-data`) |
+
+**Тести** (усього 113):
+- Catalog 35 — події при перейменуванні та зміні тривалості, публікація лише після SaveChanges, без публікації при 409, незмінність подій;
+- Booking 20 — нова подія в одній транзакції, дублікат, невалідні дані → `NonRetryableEventException`, тимчасовий збій → rollback і повтор;
+- Reviews 36 — Applied / Duplicate / Stale, порядок «зміни → EventId»;
+- EventBus 9 — camelCase JSON, ігнорування нових полів, пошкоджений JSON, `traceparent` через «брокер» (той самий TraceId, батько — span публікації), `x-retry-count`, DLQ на кожну чергу;
+- Aggregator 13.
+
+### Знімки екрана (Лаб. 08)
+
+Ресурси разом із RabbitMQ (`messaging`):
+
+![Ресурси](docs/screenshots/lab08-resources.jpg)
+
+Exchange `catalog-events` (topic) і bindings: `movie.*` → booking, `movie.renamed` → reviews:
+
+![Exchange і bindings](docs/screenshots/lab08-mq-exchange-bindings.jpg)
+
+Черги й DLQ; booking-api зупинено — 3 події чекають у `booking.catalog-sync`:
+
+![Черги](docs/screenshots/lab08-mq-queues-booking-offline.jpg)
+
+Наскрізний trace HTTP → Publish → Consume → DB:
+
+![Trace](docs/screenshots/lab08-trace-http-publish-consume-db.jpg)
+
+Некоректний JSON, надісланий через Management UI:
+
+![Публікація некоректного JSON](docs/screenshots/lab08-mq-publish-bad-json.jpg)
+
+…і він у DLQ із заголовком `x-death`:
+
+![Повідомлення в DLQ](docs/screenshots/lab08-mq-dlq-message.jpg)
+
+Метрика `messaging.consumed` з результатами `ack` / `retry` / `dead_letter`:
+
+![Метрики шини](docs/screenshots/lab08-metrics-messaging.jpg)

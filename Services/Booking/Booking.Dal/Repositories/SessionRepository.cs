@@ -82,7 +82,7 @@ public sealed class SessionRepository(SqlConnection connection, Func<SqlTransact
         ExistsAsync("SELECT COUNT(1) FROM dbo.Tickets WHERE SessionId = @Id AND IsCancelled = 0", sessionId, ct);
 
     public Task<bool> MovieExistsAsync(long movieId, CancellationToken ct = default) =>
-        ExistsAsync("SELECT COUNT(1) FROM dbo.Movies WHERE Id = @Id", movieId, ct);
+        ExistsAsync("SELECT COUNT(1) FROM dbo.Movies WHERE Id = @Id AND IsArchived = 0", movieId, ct);   // Лаб. 08: архівний у Каталозі фільм — без нових сеансів
 
     public Task<bool> HallExistsAsync(int hallId, CancellationToken ct = default) =>
         ExistsAsync("SELECT COUNT(1) FROM dbo.Halls WHERE Id = @Id AND IsActive = 1", hallId, ct);

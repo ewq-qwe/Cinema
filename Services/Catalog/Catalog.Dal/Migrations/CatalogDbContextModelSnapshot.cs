@@ -22,6 +22,74 @@ namespace Catalog.Dal.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Catalog.Dal.IntegrationEventLog.IntegrationEventLogEntry", b =>
+                {
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("CorrelationId")
+                        .HasMaxLength(100)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("Exchange")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("datetime2(7)");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("datetime2(7)");
+
+                    b.Property<string>("RoutingKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("int");
+
+                    b.Property<int>("State")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TimesSent")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TraceParent")
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(64)");
+
+                    b.HasKey("EventId");
+
+                    b.HasIndex("State", "OccurredAt")
+                        .HasDatabaseName("IX_IntegrationEventLog_Pending")
+                        .HasFilter("[State] = 0");
+
+                    b.ToTable("IntegrationEventLog", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_IntegrationEventLog_State", "[State] IN (0, 1)");
+                        });
+                });
+
             modelBuilder.Entity("Catalog.Domain.Entities.Genre", b =>
                 {
                     b.Property<int>("Id")

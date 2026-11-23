@@ -11,6 +11,11 @@
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
   </ItemGroup>
 
+  <!-- Лаб. 08: SQL-міграції схеми після Лаб. 01 (застосовує Migrations/SchemaMigrator під час старту) -->
+  <ItemGroup>
+    <EmbeddedResource Include="Migrations\*.sql" LogicalName="Booking.Dal.Migrations.%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

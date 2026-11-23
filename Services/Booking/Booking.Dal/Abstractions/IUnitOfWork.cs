@@ -13,6 +13,12 @@ public interface IUnitOfWork : IAsyncDisposable
     IBookingRepository Bookings { get; }
     IPaymentRepository Payments { get; }
 
+    /// <summary>Лаб. 08: локальна копія довідника фільмів, яку оновлюють події Каталогу.</summary>
+    IMovieCopyRepository Movies { get; }
+
+    /// <summary>Лаб. 08: оброблені події (ідемпотентність) — у тій самій транзакції, що й зміни копії.</summary>
+    IProcessedEventRepository ProcessedEvents { get; }
+
     bool HasActiveTransaction { get; }
 
     Task BeginTransactionAsync(IsolationLevel level = IsolationLevel.ReadCommitted, CancellationToken ct = default);
