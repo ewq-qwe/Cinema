@@ -1,4 +1,5 @@
 using AutoMapper;
+using Catalog.Bll.Caching;
 using Catalog.Bll.Diagnostics;
 using Catalog.Bll.Dtos;
 using Catalog.Bll.Specifications;
@@ -13,21 +14,30 @@ namespace Catalog.Bll.Services;
 /// Бізнес-операції з фільмами. Сервіс не працює з EF напряму — лише через репозиторії й Unit of Work.
 /// Правила самої сутності (рік, тривалість, титри) перевіряє Movie; сервіс перевіряє правила,
 /// для яких потрібні інші дані з БД: існування жанру й людини, унікальність «назва + рік».
+/// Лаб. 06: читання — cache-aside через дворівневий кеш (L1 пам'ять → L2 Redis → БД);
+/// кожен запис синхронно інвалідує картку фільму й усі сторінки списків.
 /// </summary>
-public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieService> logger) : IMovieService
+public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ITwoLevelCache cache, ILogger<MovieService> logger) : IMovieService
 {
     public async Task<PagedResult<MovieListItemDto>> GetListAsync(MovieQuery query, CancellationToken ct = default)
     {
         var (page, pageSize) = Paging.Normalize(query.Page, query.PageSize);
-        var spec = new MoviesFilterSpec(query, page, pageSize);
+        var version = await cache.GetVersionAsync(CatalogCacheKeys.MovieListVersion, ct);
+        var key = CatalogCacheKeys.MovieList(version, query, page, pageSize);
 
-        var total = await uow.Movies.CountAsync(spec, ct);   // COUNT(*) з тими самими фільтрами — у БД
-        var items = await uow.Movies.ListAsync(spec, ct);    // ORDER BY … OFFSET … FETCH — у БД
-        return new PagedResult<MovieListItemDto>(mapper.Map<IReadOnlyList<MovieListItemDto>>(items), total, page, pageSize);
+        return await cache.GetOrCreateAsync(key, CachePolicy.MovieList, async token =>
+        {
+            var spec = new MoviesFilterSpec(query, page, pageSize);
+            var total = await uow.Movies.CountAsync(spec, token);   // COUNT(*) з тими самими фільтрами — у БД
+            var items = await uow.Movies.ListAsync(spec, token);    // ORDER BY … OFFSET … FETCH — у БД
+            return new PagedResult<MovieListItemDto>(mapper.Map<IReadOnlyList<MovieListItemDto>>(items), total, page, pageSize);
+        }, ct);
     }
 
-    public async Task<MovieDto> GetByIdAsync(int id, CancellationToken ct = default) =>
-        mapper.Map<MovieDto>(await LoadAsync(id, ct));
+    /// <summary>Картка фільму — найчастіше читаний ресурс (REST, gRPC, Aggregator): ключ catalog:movie:{id}.</summary>
+    public Task<MovieDto> GetByIdAsync(int id, CancellationToken ct = default) =>
+        cache.GetOrCreateAsync(CatalogCacheKeys.Movie(id), CachePolicy.MovieCard,
+            async token => mapper.Map<MovieDto>(await LoadAsync(id, token)), ct);
 
     public async Task<MovieDto> CreateAsync(CreateMovieDto input, CancellationToken ct = default)
     {
@@ -43,6 +53,7 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
         await uow.SaveChangesAsync(ct);
 
         activity?.SetTag("movie.id", movie.Id);
+        await cache.BumpVersionAsync(CatalogCacheKeys.MovieListVersion, "MovieCreated", ct);
         logger.LogInformation("Створено фільм {MovieId} «{Title}» ({ReleaseYear}), жанр {GenreId}, рейтинг {AgeRating}",
             movie.Id, movie.Title, movie.ReleaseYear, movie.GenreId, movie.AgeRating);
         return await GetByIdAsync(movie.Id, ct);
@@ -67,6 +78,7 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
         movie.MoveToGenre(input.GenreId);
 
         await uow.SaveChangesAsync(ct);   // інша RowVersion у БД → ConflictException (409)
+        await InvalidateAsync(id, "MovieUpdated", ct);
         logger.LogInformation("Оновлено фільм {MovieId} «{Title}» ({ReleaseYear}): {DurationMinutes} хв, рейтинг {AgeRating}, жанр {GenreId}",
             id, movie.Title, movie.ReleaseYear, movie.DurationMinutes, movie.AgeRating, movie.GenreId);
         return await GetByIdAsync(id, ct);
@@ -79,6 +91,7 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
         var movie = await LoadAsync(id, ct);
         movie.SetDetail(input.Description, input.Country, input.TrailerUrl, input.PosterUrl, input.Budget);
         await uow.SaveChangesAsync(ct);
+        await InvalidateAsync(id, "MovieDetailChanged", ct);
         logger.LogInformation("Фільм {MovieId}: оновлено опис, країна {Country}", id, input.Country);
         return mapper.Map<MovieDto>(movie);
     }
@@ -96,6 +109,7 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
         // Правила титрів (без дублів, персонаж лише в актора, унікальна позиція) — у самій сутності
         movie.AddCredit(person, Enum.Parse<CreditRole>(input.Role, ignoreCase: true), input.CharacterName, input.BillingOrder);
         await uow.SaveChangesAsync(ct);
+        await InvalidateAsync(id, "CreditAdded", ct);
 
         logger.LogInformation("Фільм {MovieId}: додано {PersonId} як {Role}, позиція в титрах {BillingOrder}",
             id, person.Id, input.Role, input.BillingOrder);
@@ -112,6 +126,7 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
         var movie = await LoadAsync(id, ct);
         movie.RemoveCredit(personId, creditRole);
         await uow.SaveChangesAsync(ct);
+        await InvalidateAsync(id, "CreditRemoved", ct);
         logger.LogInformation("Фільм {MovieId}: прибрано {PersonId} з ролі {Role}", id, personId, creditRole);
     }
 
@@ -122,7 +137,15 @@ public sealed class MovieService(IUnitOfWork uow, IMapper mapper, ILogger<MovieS
         var movie = await uow.Movies.GetByIdAsync(id, ct) ?? throw EntityNotFoundException.For<Movie>(id);
         movie.Archive();
         await uow.SaveChangesAsync(ct);
+        await InvalidateAsync(id, "MovieArchived", ct);
         logger.LogInformation("Фільм {MovieId} «{Title}» перенесено в архів, статус {Status}", id, movie.Title, "Archived");
+    }
+
+    /// <summary>Інвалідація після запису: картка фільму й усі сторінки списків (нова версія).</summary>
+    private async Task InvalidateAsync(int id, string reason, CancellationToken ct)
+    {
+        await cache.RemoveAsync(CatalogCacheKeys.Movie(id), reason, ct);
+        await cache.BumpVersionAsync(CatalogCacheKeys.MovieListVersion, reason, ct);
     }
 
     /// <summary>Картка фільму (eager loading) з відстеженням змін — для читання й подальших операцій.</summary>

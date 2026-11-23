@@ -1,6 +1,7 @@
 using FluentValidation;
 using MediatR;
 using MongoDB.Bson;
+using Reviews.Application.Common.Caching;
 using Reviews.Application.Common.Interfaces;
 using Reviews.Application.Common.Messaging;
 using Reviews.Application.Common.Models;
@@ -9,7 +10,12 @@ using Reviews.Domain.Exceptions;
 
 namespace Reviews.Application.Reviews.Queries.GetReviewById;
 
-public sealed record GetReviewByIdQuery(string Id) : IQuery<ReviewDetailsDto>;
+public sealed record GetReviewByIdQuery(string Id) : IQuery<ReviewDetailsDto>, ICacheableQuery
+{
+    // Некоректний Id не дійде сюди (ValidationBehavior стоїть раніше), але ключ будуємо лише з валідного
+    public string? CacheKey => ObjectId.TryParse(Id, out var id) ? ReviewsCacheKeys.Review(id.ToString()) : null;
+    public CachePolicy CachePolicy => CachePolicy.Review;
+}
 
 /// <summary>Обробник не знає про MongoDB: читає через IReviewQueries (проєкція реалізована в Infrastructure).</summary>
 public sealed class GetReviewByIdQueryHandler(IReviewQueries queries) : IRequestHandler<GetReviewByIdQuery, ReviewDetailsDto>

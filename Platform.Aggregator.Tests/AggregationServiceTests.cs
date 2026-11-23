@@ -41,9 +41,10 @@ public class AggregationServiceTests
             new(new StubHandler(respond)) { BaseAddress = new Uri($"http://{host}") };
 
         return new AggregationService(
-            new BookingClient(Client("booking-api", booking)),
-            new CatalogClient(Client("catalog-api", catalog)),
-            new ReviewsClient(Client("reviews-api", reviews)),
+            new HttpPlatformSources(
+                new BookingClient(Client("booking-api", booking)),
+                new CatalogClient(Client("catalog-api", catalog)),
+                new ReviewsClient(Client("reviews-api", reviews))),
             NullLogger<AggregationService>.Instance);
     }
 

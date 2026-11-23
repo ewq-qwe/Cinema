@@ -1,4 +1,5 @@
 using AutoMapper;
+using Catalog.Bll.Caching;
 using Catalog.Bll.Dtos;
 using Catalog.Dal.Abstractions;
 using Catalog.Domain.Entities;
@@ -7,10 +8,12 @@ using Microsoft.Extensions.Logging;
 
 namespace Catalog.Bll.Services;
 
-public sealed class GenreService(IUnitOfWork uow, IMapper mapper, ILogger<GenreService> logger) : IGenreService
+public sealed class GenreService(IUnitOfWork uow, IMapper mapper, ITwoLevelCache cache, ILogger<GenreService> logger) : IGenreService
 {
+    /// <summary>Довідник жанрів — рідко змінюється, тож довгий absolute TTL (catalog:genres:all).</summary>
     public async Task<IReadOnlyList<GenreDto>> GetAllAsync(CancellationToken ct = default) =>
-        mapper.Map<IReadOnlyList<GenreDto>>((await uow.Genres.GetAllAsync(ct)).OrderBy(g => g.Name).ToList());
+        await cache.GetOrCreateAsync(CatalogCacheKeys.Genres, CachePolicy.Genres, async token =>
+            (IReadOnlyList<GenreDto>)mapper.Map<List<GenreDto>>((await uow.Genres.GetAllAsync(token)).OrderBy(g => g.Name).ToList()), ct);
 
     /// <summary>Жанр і його фільми — explicit loading (два запити).</summary>
     public async Task<GenreWithMoviesDto> GetWithMoviesAsync(int id, CancellationToken ct = default) =>
@@ -25,6 +28,7 @@ public sealed class GenreService(IUnitOfWork uow, IMapper mapper, ILogger<GenreS
         var genre = new Genre(name);
         await uow.Genres.AddAsync(genre, ct);
         await uow.SaveChangesAsync(ct);
+        await cache.RemoveAsync(CatalogCacheKeys.Genres, "GenreCreated", ct);
         logger.LogInformation("Створено жанр {GenreId} «{Name}»", genre.Id, genre.Name);
         return mapper.Map<GenreDto>(genre);
     }
@@ -37,5 +41,7 @@ public sealed class GenreService(IUnitOfWork uow, IMapper mapper, ILogger<GenreS
 
         uow.Genres.Delete(genre);
         await uow.SaveChangesAsync(ct);
+        await cache.RemoveAsync(CatalogCacheKeys.Genres, "GenreDeleted", ct);
+        logger.LogInformation("Видалено жанр {GenreId} «{Name}»", id, genre.Name);
     }
 }

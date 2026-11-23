@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+option csharp_namespace = "Reviews.Grpc";
+
+package reviews;
+
+import "google/protobuf/timestamp.proto";
+
+// Читання відгуків для внутрішніх сервісів (Aggregator). Виклики йдуть через той самий pipeline MediatR,
+// що й REST: валідація, кеш (L1 → L2 Redis → MongoDB), логування.
+service ReviewsService {
+  // Середня оцінка й розподіл оцінок фільму. NOT_FOUND — на фільм ще немає відгуків.
+  rpc GetMovieRating (GetMovieRatingRequest) returns (MovieRatingReply);
+  // Останні відгуки на фільм.
+  rpc GetLatestReviews (GetLatestReviewsRequest) returns (ReviewsReply);
+  // Відгук за Id (рядковий ObjectId).
+  rpc GetReview (GetReviewRequest) returns (ReviewReply);
+}
+
+message GetMovieRatingRequest {
+  int32 movie_id = 1;
+}
+
+message GetLatestReviewsRequest {
+  int32 movie_id = 1;
+  // 1..100; 0 — значення за замовчуванням (3)
+  int32 count = 2;
+}
+
+message GetReviewRequest {
+  string id = 1;
+}
+
+message MovieRatingReply {
+  int32 movie_id = 1;
+  string movie_title = 2;
+  double average = 3;
+  int32 count = 4;
+  // оцінка (1..5) → кількість відгуків
+  map<int32, int32> distribution = 5;
+}
+
+message ReviewReply {
+  string id = 1;
+  int32 movie_id = 2;
+  string author_name = 3;
+  // quick | full | critic
+  string kind = 4;
+  int32 rating = 5;
+  optional string title = 6;
+  optional string text = 7;
+  int32 likes = 8;
+  int32 comments_count = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message ReviewsReply {
+  repeated ReviewReply reviews = 1;
+  int64 total_count = 2;
+}

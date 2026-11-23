@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,6 +10,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Platform.ServiceDefaults.Correlation;
+using Platform.ServiceDefaults.Grpc;
 using Platform.ServiceDefaults.Logging;
 using Serilog;
 using Serilog.Events;
@@ -31,6 +33,9 @@ public static class Extensions
 
     /// <summary>ActivitySource бізнес-шарів сервісів: Booking.Bll, Catalog.Bll, Reviews.Application.</summary>
     private static readonly string[] BusinessActivitySources = ["Booking.Bll", "Catalog.Bll", "Reviews.Application"];
+
+    /// <summary>Meter-и кешу (Лаб. 06): cache.hits / cache.misses з тегом cache.level (L1 | L2).</summary>
+    private static readonly string[] CacheMeters = ["Catalog.Cache", "Reviews.Cache", "Platform.Aggregator.Cache"];
 
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
@@ -74,6 +79,7 @@ public static class Extensions
             .MinimumLevel.Override("Polly", LogEventLevel.Warning)
             .MinimumLevel.Override("MongoDB", LogEventLevel.Warning)
             .MinimumLevel.Override("Yarp", LogEventLevel.Information)
+            .MinimumLevel.Override("Grpc", LogEventLevel.Warning)                 // внутрішні Debug-логи gRPC на кожне повідомлення; свої логи — в interceptor
             .ReadFrom.Configuration(builder.Configuration)   // точкові перевизначення рівнів з appsettings сервісу
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
@@ -113,12 +119,14 @@ public static class Extensions
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation()
-                .AddMeter(serviceName))                              // власні метрики сервісу (напр., Gateway)
+                .AddMeter(serviceName)                               // власні метрики сервісу (напр., Gateway)
+                .AddMeter(CacheMeters))                              // метрики кешу
             .WithTracing(t => t
                 .SetSampler(CreateSampler(builder))
                 .AddSource(serviceName)                              // власні spans застосунку (напр., Platform.Aggregator)
                 .AddSource(BusinessActivitySources)                  // spans бізнес-операцій сервісів
                 .AddSource(MongoActivitySource)                      // MongoDB (Лаб. 04)
+                .AddSource("Grpc.Net.Client")                        // клієнтський span gRPC-виклику (Лаб. 06): батько для HTTP/2-запиту
                 .AddAspNetCoreInstrumentation(o =>
                     o.Filter = ctx => !ctx.Request.Path.StartsWithSegments(HealthEndpointPath)
                                       && !ctx.Request.Path.StartsWithSegments(AlivenessEndpointPath))
@@ -139,6 +147,20 @@ public static class Extensions
         return new ParentBasedSampler(new TraceIdRatioBasedSampler(ratio));
     }
 
+    /// <summary>
+    /// gRPC-сервер з однаковим для всіх сервісів interceptor-ом логування (метод, peer, статус, тривалість).
+    /// Spans серверних викликів (rpc.service, rpc.method) додає інструментація ASP.NET Core.
+    /// </summary>
+    public static IServiceCollection AddDefaultGrpc(this IServiceCollection services, bool detailedErrors = false)
+    {
+        services.AddGrpc(o =>
+        {
+            o.Interceptors.Add<GrpcLoggingInterceptor>();
+            o.EnableDetailedErrors = detailedErrors;
+        });
+        return services;
+    }
+
     public static TBuilder AddDefaultHealthChecks<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         builder.Services.AddHealthChecks()
@@ -147,9 +169,29 @@ public static class Extensions
     }
 
     /// <summary>/health — усі перевірки (у т. ч. бази даних); /alive — лише «процес живий».</summary>
+    /// <summary>JSON-звіт /health: статус кожної перевірки та її дані (напр., hit ratio кешу L1 / L2).</summary>
+    private static Task WriteHealthJson(Microsoft.AspNetCore.Http.HttpContext context, HealthReport report)
+    {
+        context.Response.ContentType = "application/json; charset=utf-8";
+        return context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(new
+        {
+            status = report.Status.ToString(),
+            durationMs = Math.Round(report.TotalDuration.TotalMilliseconds, 1),
+            checks = report.Entries.ToDictionary(e => e.Key, e => new
+            {
+                status = e.Value.Status.ToString(),
+                description = e.Value.Description,
+                data = e.Value.Data.Count == 0 ? null : e.Value.Data
+            })
+        }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        }));
+    }
+
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
-        app.MapHealthChecks(HealthEndpointPath);
+        app.MapHealthChecks(HealthEndpointPath, new HealthCheckOptions { ResponseWriter = WriteHealthJson });
         app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
         return app;
     }

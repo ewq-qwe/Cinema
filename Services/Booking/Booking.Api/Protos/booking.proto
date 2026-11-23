@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+option csharp_namespace = "Booking.Grpc";
+
+package booking;
+
+import "google/protobuf/timestamp.proto";
+
+// Читання бронювань і розкладу для внутрішніх сервісів (Aggregator).
+// Номери полів не змінюються після публікації — від них залежить бінарна сумісність.
+service BookingService {
+  // Бронювання з квитками й оплатою.
+  rpc GetBooking (GetBookingRequest) returns (BookingReply);
+  // Сеанс (з нього відомо, який фільм у Каталозі).
+  rpc GetSession (GetSessionRequest) returns (SessionReply);
+  // Майбутні сеанси фільму.
+  rpc GetUpcomingSessions (GetUpcomingSessionsRequest) returns (SessionsReply);
+}
+
+// Гроші без похибок double: units + nanos (як google.type.Money), 12.50 = { units: 12, nanos: 500000000 }.
+message DecimalValue {
+  int64 units = 1;
+  int32 nanos = 2;
+}
+
+message GetBookingRequest {
+  int64 id = 1;
+}
+
+message GetSessionRequest {
+  int64 id = 1;
+}
+
+message GetUpcomingSessionsRequest {
+  int64 movie_id = 1;
+}
+
+message BookingReply {
+  int64 id = 1;
+  int64 customer_id = 2;
+  int64 session_id = 3;
+  // Created | Paid | Used | Cancelled
+  string status = 4;
+  // знімок назви фільму на момент бронювання
+  string movie_title = 5;
+  google.protobuf.Timestamp session_starts_at = 6;
+  DecimalValue total_amount = 7;
+  optional string cancel_reason = 8;
+  google.protobuf.Timestamp created_at = 9;
+  repeated TicketReply tickets = 10;
+  optional PaymentReply payment = 11;
+}
+
+message TicketReply {
+  int32 seat_id = 1;
+  int32 row_number = 2;
+  int32 seat_number = 3;
+  string seat_type = 4;
+  DecimalValue price = 5;
+  bool is_cancelled = 6;
+}
+
+message PaymentReply {
+  DecimalValue amount = 1;
+  // card | cash | online (без TransactionId — чутливі дані не передаються)
+  string method = 2;
+  google.protobuf.Timestamp paid_at = 3;
+}
+
+message SessionReply {
+  int64 id = 1;
+  int64 movie_id = 2;
+  string movie_title = 3;
+  int32 duration_minutes = 4;
+  string age_rating = 5;
+  int32 hall_id = 6;
+  string hall_name = 7;
+  google.protobuf.Timestamp starts_at = 8;
+  DecimalValue base_price = 9;
+}
+
+message SessionsReply {
+  repeated SessionReply sessions = 1;
+}

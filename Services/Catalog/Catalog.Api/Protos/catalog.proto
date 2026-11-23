@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+option csharp_namespace = "Catalog.Grpc";
+
+package catalog;
+
+// Читання каталогу фільмів для внутрішніх сервісів (Aggregator). Зовнішні клієнти ходять через REST + Gateway.
+// Номери полів не змінюються після публікації: саме вони, а не імена, визначають бінарний формат.
+service CatalogService {
+  // Картка фільму з описом і титрами (кешується: L1 пам'ять → L2 Redis → БД).
+  rpc GetMovie (GetMovieRequest) returns (MovieReply);
+  // Кілька карток за один виклик (наприклад, для списку бронювань).
+  rpc GetMoviesByIds (GetMoviesByIdsRequest) returns (MoviesReply);
+  // Довідник жанрів.
+  rpc ListGenres (ListGenresRequest) returns (GenresReply);
+}
+
+message GetMovieRequest {
+  int32 id = 1;
+}
+
+message GetMoviesByIdsRequest {
+  repeated int32 ids = 1;
+}
+
+message ListGenresRequest {
+}
+
+message MovieReply {
+  int32 id = 1;
+  string title = 2;
+  int32 release_year = 3;
+  int32 duration_minutes = 4;
+  string age_rating = 5;
+  int32 genre_id = 6;
+  string genre_name = 7;
+  // optional: у proto3 відрізняє «не задано» від порожнього рядка
+  optional string description = 8;
+  optional string country = 9;
+  optional string poster_url = 10;
+  optional string trailer_url = 11;
+  repeated CreditReply credits = 12;
+}
+
+message CreditReply {
+  int32 person_id = 1;
+  string person_full_name = 2;
+  // Actor | Director
+  string role = 3;
+  optional string character_name = 4;
+  int32 billing_order = 5;
+}
+
+message MoviesReply {
+  repeated MovieReply movies = 1;
+  // Id, яких немає в каталозі (або архівні)
+  repeated int32 missing_ids = 2;
+}
+
+message GenreReply {
+  int32 id = 1;
+  string name = 2;
+}
+
+message GenresReply {
+  repeated GenreReply genres = 1;
+}

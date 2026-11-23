@@ -1,0 +1,25 @@
+# Лаб. 06 — структуровані логи (Serilog, CompactJsonFormatter, logs/<сервіс>-*.json): gRPC-interceptor і операції кешу
+# Формат: час | сервіс | [CorrelationId] | повідомлення | структуровані властивості
+
+18:20:35.957 | catalog-api | [lab06-logs-demo]     | Cache miss catalog:movie:4 — reading from database | {"CacheKey": "catalog:movie:4"}
+18:20:36.683 | catalog-api | [lab06-logs-demo]     | Cache filled catalog:movie:4: 1603 bytes, L1 TTL 00:02:00, L2 TTL 00:30:00 | {"CacheKey": "catalog:movie:4", "SizeBytes": 1603, "L1Ttl": "00:02:00", "L2Ttl": "00:30:00"}
+18:20:36.685 | catalog-api | [lab06-logs-demo]     | gRPC /catalog.CatalogService/GetMovie from ipv6:[::1]:63060: OK in 731 ms | {"GrpcMethod": "/catalog.CatalogService/GetMovie", "GrpcPeer": "ipv6:[::1]:63060", "GrpcStatus": "OK", "ElapsedMs": 731}
+18:20:36.693 | reviews-api | [lab06-logs-demo]     | Cache hit reviews:list-version at L1 | {"CacheKey": "reviews:list-version", "CacheLevel": "L1"}
+18:20:36.694 | reviews-api | [lab06-logs-demo]     | Cache miss reviews:rating:4 — reading from MongoDB | {"CacheKey": "reviews:rating:4"}
+18:20:36.695 | booking-api | [lab06-logs-demo]     | gRPC /booking.BookingService/GetUpcomingSessions from ipv6:[::1]:63058: OK in 3 ms | {"GrpcMethod": "/booking.BookingService/GetUpcomingSessions", "GrpcPeer": "ipv6:[::1]:63058", "GrpcStatus": "OK", "ElapsedMs": 3}
+18:20:36.695 | reviews-api | [lab06-logs-demo]     | Cache miss reviews:list:4:::::newest:1:3:vf0867e18 — reading from MongoDB | {"CacheKey": "reviews:list:4:::::newest:1:3:vf0867e18"}
+18:20:36.705 | reviews-api | [lab06-logs-demo]     | Cache filled reviews:list:4:::::newest:1:3:vf0867e18: 728 bytes, L1 TTL 00:00:30, L2 TTL 00:05:00 | {"CacheKey": "reviews:list:4:::::newest:1:3:vf0867e18", "SizeBytes": 728, "L1Ttl": "00:00:30", "L2Ttl": "00:05:00"}
+18:20:36.707 | reviews-api | [lab06-logs-demo]     | gRPC /reviews.ReviewsService/GetLatestReviews from ipv6:[::1]:63062: OK in 15 ms | {"GrpcMethod": "/reviews.ReviewsService/GetLatestReviews", "GrpcPeer": "ipv6:[::1]:63062", "GrpcStatus": "OK", "ElapsedMs": 15}
+18:20:36.805 | reviews-api | [lab06-logs-demo]     | Cache filled reviews:rating:4: 171 bytes, L1 TTL 00:01:00, L2 TTL 00:10:00 | {"CacheKey": "reviews:rating:4", "SizeBytes": 171, "L1Ttl": "00:01:00", "L2Ttl": "00:10:00"}
+18:20:36.806 | reviews-api | [lab06-logs-demo]     | gRPC /reviews.ReviewsService/GetMovieRating from ipv6:[::1]:63062: OK in 114 ms | {"GrpcMethod": "/reviews.ReviewsService/GetMovieRating", "GrpcPeer": "ipv6:[::1]:63062", "GrpcStatus": "OK", "ElapsedMs": 114}
+18:20:36.889 | aggregator  | [lab06-logs-demo-2]   | Aggregated cache miss aggregator:movie:4:full | {"CacheKey": "aggregator:movie:4:full"}
+18:20:36.891 | catalog-api | [lab06-logs-demo-2]   | Cache hit catalog:movie:4 at L1 | {"CacheKey": "catalog:movie:4", "CacheLevel": "L1"}
+18:20:36.891 | catalog-api | [lab06-logs-demo-2]   | gRPC /catalog.CatalogService/GetMovie from ipv6:[::1]:63060: OK in 0 ms | {"GrpcMethod": "/catalog.CatalogService/GetMovie", "GrpcPeer": "ipv6:[::1]:63060", "GrpcStatus": "OK", "ElapsedMs": 0}
+18:20:36.893 | reviews-api | [lab06-logs-demo-2]   | Cache hit reviews:rating:4 at L1 | {"CacheKey": "reviews:rating:4", "CacheLevel": "L1"}
+18:20:36.894 | reviews-api | [lab06-logs-demo-2]   | gRPC /reviews.ReviewsService/GetMovieRating from ipv6:[::1]:63062: OK in 0 ms | {"GrpcMethod": "/reviews.ReviewsService/GetMovieRating", "GrpcPeer": "ipv6:[::1]:63062", "GrpcStatus": "OK", "ElapsedMs": 0}
+18:20:36.896 | booking-api | [lab06-logs-demo-2]   | gRPC /booking.BookingService/GetUpcomingSessions from ipv6:[::1]:63058: OK in 2 ms | {"GrpcMethod": "/booking.BookingService/GetUpcomingSessions", "GrpcPeer": "ipv6:[::1]:63058", "GrpcStatus": "OK", "ElapsedMs": 2}
+18:20:36.896 | reviews-api | [lab06-logs-demo-2]   | Cache hit reviews:list-version at L2, 20 bytes | {"CacheKey": "reviews:list-version", "CacheLevel": "L2", "SizeBytes": 20}
+18:20:36.896 | reviews-api | [lab06-logs-demo-2]   | Cache hit reviews:list:4:::::newest:1:3:vf0867e18 at L1 | {"CacheKey": "reviews:list:4:::::newest:1:3:vf0867e18", "CacheLevel": "L1"}
+18:20:36.896 | reviews-api | [lab06-logs-demo-2]   | gRPC /reviews.ReviewsService/GetLatestReviews from ipv6:[::1]:63062: OK in 2 ms | {"GrpcMethod": "/reviews.ReviewsService/GetLatestReviews", "GrpcPeer": "ipv6:[::1]:63062", "GrpcStatus": "OK", "ElapsedMs": 2}
+18:20:36.902 | aggregator  | [lab06-logs-demo-2]   | Aggregated response cached aggregator:movie:4:full for 30 s | {"CacheKey": "aggregator:movie:4:full", "TtlSeconds": 30}
+18:20:36.983 | aggregator  | [lab06-logs-demo-3]   | Aggregated cache hit aggregator:movie:4:full: gRPC-виклики пропущено | {"CacheKey": "aggregator:movie:4:full"}

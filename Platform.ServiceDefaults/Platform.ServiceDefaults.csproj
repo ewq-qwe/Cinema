@@ -29,6 +29,9 @@
     <!-- закриває NU1902/NU1903: транзитивна System.Security.Cryptography.Pkcs 9.0.x у SqlClient сервісу бронювання -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
 
+    <!-- gRPC-сервер (Лаб. 06): спільний interceptor логування -->
+    <PackageReference Include="Grpc.AspNetCore" Version="2.85.0" />
+
     <!-- Serilog: структуроване логування -->
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
