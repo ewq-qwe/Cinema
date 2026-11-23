@@ -1,11 +1,14 @@
 using System.Reflection;
 using Booking.Api.Errors;
 using Booking.Api.Grpc;
+using Booking.Api.HealthChecks;
+using Booking.Api.Metrics;
 using Booking.Bll.Mapping;
 using Booking.Bll.Services;
 using Booking.Dal;
 using Booking.Dal.Abstractions;
 using Platform.ServiceDefaults.Correlation;
+using Grpc.AspNetCore.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -44,6 +47,17 @@ builder.Services.AddControllers();
 // ---------- Лаб. 06: gRPC-сервер для внутрішніх викликів (interceptor логування — зі ServiceDefaults) ----------
 builder.Services.AddDefaultGrpc(detailedErrors: builder.Environment.IsDevelopment());
 
+// ---------- Лаб. 07: health checks (SQL Server у readiness) + стандартний gRPC Health Checking Protocol ----------
+builder.Services.AddBookingHealthChecks(builder.Configuration);
+// grpc.health.v1.Health (стандартний gRPC Health Checking Protocol) — його викликає Aggregator.
+// Мапимо лише перевірки БД: gRPC-статус означає «можу обслуговувати запити»; відмова кешу (Degraded) не робить сервіс NOT_SERVING.
+builder.Services.AddGrpcHealthChecks();
+builder.Services.Configure<GrpcHealthChecksOptions>(o => o.Services.Map("", r => r.Tags.Contains(HealthTags.Database)));
+
+// ---------- Лаб. 07: бізнес-метрики (Meter "Booking.Api") ----------
+builder.Services.AddSingleton<BookingMetrics>();
+builder.Services.AddHostedService<BookingSnapshotService>();
+
 // ---------- OpenAPI / Swagger ----------
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(o =>
@@ -73,7 +87,8 @@ if (app.Environment.IsDevelopment())
 
 app.MapControllers();
 app.MapGrpcService<BookingGrpcService>();   // HTTP/2 (endpoint "grpc" в AppHost)
-app.MapDefaultEndpoints();   // /health і /alive
+app.MapGrpcHealthChecksService();            // grpc.health.v1.Health/Check — його викликає Aggregator
+app.MapDefaultEndpoints();   // /health/live, /health/ready, /health, /alive
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();

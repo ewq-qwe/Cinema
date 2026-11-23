@@ -1,0 +1,81 @@
+# Лаб. 07 — liveness і readiness при зупиненому SQL Server (Redis теж зупинено)
+# /health/live перевіряє лише процес (тег live) → 200; /health/ready перевіряє залежності (тег ready) → 503
+
+## :5093 (booking-api / catalog-api)
+GET /health/live -> HTTP 200, 0.011867 s
+{
+  "status": "Healthy",
+  "durationMs": 0.1,
+  "checks": {
+    "self": {
+      "status": "Healthy",
+      "description": "Процес відповідає.",
+      "durationMs": 0,
+      "tags": [
+        "live"
+      ]
+    }
+  }
+}
+GET /health/ready -> HTTP 503, 0.004885 s
+{
+  "status": "Unhealthy",
+  "durationMs": 1.1,
+  "checks": {
+    "booking-db": {
+      "status": "Unhealthy",
+      "durationMs": 0.2,
+      "tags": [
+        "database",
+        "sql",
+        "ready"
+      ],
+      "error": "Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласования. Возможно, произошел сбой во время предварительного согласования, или сервер не смог ответить вовремя.  Время, затраченное на попытки подключиться к этому серверу, составило: [Pre-Login] initialization=2; handshake=15005; "
+    }
+  }
+}
+
+## :5024 (booking-api / catalog-api)
+GET /health/live -> HTTP 200, 0.007017 s
+{
+  "status": "Healthy",
+  "durationMs": 0.1,
+  "checks": {
+    "self": {
+      "status": "Healthy",
+      "description": "Процес відповідає.",
+      "durationMs": 0,
+      "tags": [
+        "live"
+      ]
+    }
+  }
+}
+GET /health/ready -> HTTP 503, 3.019754 s
+{
+  "status": "Unhealthy",
+  "durationMs": 3010.8,
+  "checks": {
+    "catalog-db": {
+      "status": "Unhealthy",
+      "durationMs": 818.9,
+      "tags": [
+        "database",
+        "sql",
+        "ready"
+      ],
+      "error": "Истекло время ожидания соединения. Время ожидания истекло при попытке обработки подтверждения предварительного согласования. Возможно, произошел сбой во время предварительного согласования, или сервер не смог ответить вовремя.  Время, затраченное на попытки подключиться к этому серверу, составило: [Pre-Login] initialization=0; handshake=15012; "
+    },
+    "redis-cache": {
+      "status": "Degraded",
+      "description": "Healthcheck timed out",
+      "durationMs": 3010.5,
+      "tags": [
+        "cache",
+        "redis",
+        "ready"
+      ]
+    }
+  }
+}
+

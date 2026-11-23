@@ -6,8 +6,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" Version="13.6.1" />
+    <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
+    <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" Version="13.6.5" />
     <PackageReference Include="Google.Protobuf" Version="3.36.2" />
+    <PackageReference Include="Grpc.HealthCheck" Version="2.85.0" />
     <PackageReference Include="Grpc.Net.ClientFactory" Version="2.85.0" />
     <PackageReference Include="Grpc.Tools" Version="2.85.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -28,7 +30,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);1591</NoWarn>
+    <!-- EXTEXP0001: RemoveAllResilienceHandlers — експериментальний API Microsoft.Extensions.Http.Resilience; саме він
+         прибирає стандартний обробник ServiceDefaults перед власним (без нашарування), як радить документація -->
+    <NoWarn>$(NoWarn);1591;EXTEXP0001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

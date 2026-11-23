@@ -1,3 +1,4 @@
+using Booking.Api.Metrics;
 using Booking.Bll.Dtos;
 using Booking.Bll.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -8,7 +9,8 @@ namespace Booking.Api.Controllers;
 [ApiController]
 [Route("api/bookings")]
 [Produces("application/json")]
-public sealed class BookingsController(IBookingService bookings) : ControllerBase
+// Лаб. 07: операції запису вимірюються (bookings.operation.duration) і рахуються бізнес-лічильниками.
+public sealed class BookingsController(IBookingService bookings, BookingMetrics metrics) : ControllerBase
 {
     /// <summary>Бронювання з квитками та оплатою.</summary>
     [HttpGet("{id:long}")]
@@ -25,7 +27,8 @@ public sealed class BookingsController(IBookingService bookings) : ControllerBas
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BookingDto>> Create(CreateBookingDto input, CancellationToken ct)
     {
-        var created = await bookings.CreateAsync(input, ct);
+        var created = await metrics.MeasureAsync("create", () => bookings.CreateAsync(input, ct));
+        metrics.BookingCreated(created.Status, created.Tickets.Count);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
@@ -36,7 +39,11 @@ public sealed class BookingsController(IBookingService bookings) : ControllerBas
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<BookingDto>> Pay(long id, PayBookingDto input, CancellationToken ct)
-        => Ok(await bookings.PayAsync(id, input, ct));
+    {
+        var paid = await metrics.MeasureAsync("pay", () => bookings.PayAsync(id, input, ct));
+        metrics.BookingPaid(input.Method);
+        return Ok(paid);
+    }
 
     /// <summary>Скасувати бронювання (лише до початку сеансу).</summary>
     [HttpPost("{id:long}/cancel")]
@@ -45,7 +52,8 @@ public sealed class BookingsController(IBookingService bookings) : ControllerBas
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Cancel(long id, CancelBookingDto input, CancellationToken ct)
     {
-        await bookings.CancelAsync(id, input, ct);
+        await metrics.MeasureAsync("cancel", () => bookings.CancelAsync(id, input, ct));
+        metrics.BookingCancelled();
         return NoContent();
     }
 
@@ -56,7 +64,8 @@ public sealed class BookingsController(IBookingService bookings) : ControllerBas
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> CheckIn(long id, CancellationToken ct)
     {
-        await bookings.CheckInAsync(id, ct);
+        await metrics.MeasureAsync("check-in", () => bookings.CheckInAsync(id, ct));
+        metrics.BookingCheckedIn();
         return NoContent();
     }
 }

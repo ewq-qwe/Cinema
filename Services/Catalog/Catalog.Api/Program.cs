@@ -1,6 +1,7 @@
 using System.Reflection;
 using Catalog.Api.Errors;
 using Catalog.Api.Grpc;
+using Catalog.Api.HealthChecks;
 using Catalog.Api.Metrics;
 using Catalog.Bll.Caching;
 using Catalog.Bll.Mapping;
@@ -13,6 +14,7 @@ using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Platform.ServiceDefaults.Correlation;
+using Grpc.AspNetCore.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -34,6 +36,7 @@ builder.Services.AddMemoryCache(o =>
 {
     o.SizeLimit = builder.Configuration.GetValue("Caching:MemorySizeLimitKb", 20_000); // одиниці Size = КБ значення
     o.CompactionPercentage = 0.25;                                                     // при переповненні витісняється чверть
+    o.TrackStatistics = true;                                                          // Лаб. 07: gauges розміру L1
 });
 // IDistributedCache поверх Redis; рядок підключення ConnectionStrings:redis
 builder.AddRedisDistributedCache("redis",
@@ -43,7 +46,15 @@ builder.AddRedisDistributedCache("redis",
     options => { options.AbortOnConnectFail = false; options.ConnectTimeout = 1000; options.SyncTimeout = 1000; options.AsyncTimeout = 1000; });
 builder.Services.AddSingleton<CacheMetrics>();
 builder.Services.AddSingleton<ITwoLevelCache, TwoLevelCache>();
-builder.Services.AddHealthChecks().AddCheck<CacheHealthCheck>("cache");
+// ---------- Лаб. 07: health checks — SQL Server (Unhealthy) і Redis (Degraded) у readiness + статистика кешу ----------
+builder.Services.AddCatalogHealthChecks(builder.Configuration);
+// grpc.health.v1.Health (стандартний gRPC Health Checking Protocol) — його викликає Aggregator.
+// Мапимо лише перевірки БД: gRPC-статус означає «можу обслуговувати запити»; відмова кешу (Degraded) не робить сервіс NOT_SERVING.
+builder.Services.AddGrpcHealthChecks();
+builder.Services.Configure<GrpcHealthChecksOptions>(o => o.Services.Map("", r => r.Tags.Contains(HealthTags.Database)));
+
+// ---------- Лаб. 07: бізнес-метрики (Meter "Catalog.Api") ----------
+builder.Services.AddSingleton<CatalogMetrics>();
 
 // ---------- Лаб. 06: gRPC-сервер (interceptor логування — зі ServiceDefaults) ----------
 builder.Services.AddDefaultGrpc(detailedErrors: builder.Environment.IsDevelopment());
@@ -112,7 +123,8 @@ if (app.Environment.IsDevelopment())
 
 app.MapControllers();
 app.MapGrpcService<CatalogGrpcService>();   // HTTP/2 (endpoint "grpc" в AppHost)
-app.MapDefaultEndpoints();   // /health і /alive
+app.MapGrpcHealthChecksService();            // grpc.health.v1.Health/Check — його викликає Aggregator
+app.MapDefaultEndpoints();   // /health/live, /health/ready, /health, /alive
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();

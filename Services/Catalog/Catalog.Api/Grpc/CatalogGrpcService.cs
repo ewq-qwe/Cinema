@@ -1,3 +1,4 @@
+using Catalog.Api.Metrics;
 using Catalog.Bll.Dtos;
 using Catalog.Bll.Services;
 using Catalog.Domain.Exceptions;
@@ -10,7 +11,7 @@ namespace Catalog.Api.Grpc;
 /// gRPC-адаптер над тим самим BLL, що й REST-контролери: бізнес-логіка й кеш (Лаб. 06) спільні для обох протоколів.
 /// Доменні винятки перетворюються на RpcException з точним кодом (NotFound / InvalidArgument), а не Internal.
 /// </summary>
-public sealed class CatalogGrpcService(IMovieService movies, IGenreService genres) : CatalogService.CatalogServiceBase
+public sealed class CatalogGrpcService(IMovieService movies, IGenreService genres, CatalogMetrics metrics) : CatalogService.CatalogServiceBase
 {
     public const int MaxIdsPerRequest = 50;
 
@@ -19,9 +20,10 @@ public sealed class CatalogGrpcService(IMovieService movies, IGenreService genre
         if (request.Id <= 0)
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Id фільму має бути додатним."));
 
+        metrics.CardRequested("grpc");
         try
         {
-            return ToReply(await movies.GetByIdAsync(request.Id, context.CancellationToken));
+            return ToReply(await metrics.MeasureAsync("get-card", () => movies.GetByIdAsync(request.Id, context.CancellationToken)));
         }
         catch (EntityNotFoundException ex)
         {

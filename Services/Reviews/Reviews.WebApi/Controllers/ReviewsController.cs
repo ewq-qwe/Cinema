@@ -9,12 +9,14 @@ using Reviews.Application.Reviews.Commands.UpdateReview;
 using Reviews.Application.Reviews.Queries.GetReviewById;
 using Reviews.Application.Reviews.Queries.GetReviewsList;
 using Reviews.WebApi.Contracts;
+using Reviews.WebApi.Metrics;
 
 namespace Reviews.WebApi.Controllers;
 
 /// <summary>Відгуки на фільми (колекція reviews).</summary>
 [Route("api/reviews")]
-public sealed class ReviewsController(IMapper mapper) : ApiControllerBase
+// Лаб. 07: операції запису вимірюються (reviews.operation.duration) і рахуються бізнес-лічильниками (ReviewsMetrics).
+public sealed class ReviewsController(IMapper mapper, ReviewsMetrics metrics) : ApiControllerBase
 {
     /// <summary>Список відгуків: фільтри, повнотекстовий пошук, сортування, пагінація (skip/limit у MongoDB).</summary>
     /// <param name="movieId">Фільм (Movies.Id з Каталогу).</param>
@@ -58,7 +60,8 @@ public sealed class ReviewsController(IMapper mapper) : ApiControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<string>> Create(CreateReviewCommand command, CancellationToken ct)
     {
-        var id = await Mediator.Send(command, ct);
+        var id = await metrics.MeasureAsync("create", () => Mediator.Send(command, ct));
+        metrics.ReviewCreated(command.Kind, command.Rating);
         SetETag(0);
         return CreatedAtAction(nameof(GetById), new { id }, id);
     }
@@ -76,7 +79,8 @@ public sealed class ReviewsController(IMapper mapper) : ApiControllerBase
         if (ParseIfMatch(ifMatch) is not { } version) return PreconditionRequired();
 
         var command = mapper.Map<UpdateReviewCommand>(request) with { Id = id, ExpectedVersion = version };
-        var review = await Mediator.Send(command, ct);
+        var review = await metrics.MeasureAsync("update", () => Mediator.Send(command, ct));
+        metrics.ReviewUpdated();
         SetETag(review.Version);
         return Ok(review);
     }
@@ -89,7 +93,8 @@ public sealed class ReviewsController(IMapper mapper) : ApiControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Delete(string id, [FromHeader(Name = "If-Match")] string? ifMatch, CancellationToken ct)
     {
-        await Mediator.Send(new DeleteReviewCommand(id, ParseIfMatch(ifMatch)), ct);
+        await metrics.MeasureAsync("delete", async () => { await Mediator.Send(new DeleteReviewCommand(id, ParseIfMatch(ifMatch)), ct); return true; });
+        metrics.ReviewDeleted();
         return NoContent();
     }
 
@@ -101,7 +106,8 @@ public sealed class ReviewsController(IMapper mapper) : ApiControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ReviewDetailsDto>> AddComment(string id, AddCommentRequest request, CancellationToken ct)
     {
-        var review = await Mediator.Send(mapper.Map<AddCommentCommand>(request) with { ReviewId = id }, ct);
+        var review = await metrics.MeasureAsync("add-comment", () => Mediator.Send(mapper.Map<AddCommentCommand>(request) with { ReviewId = id }, ct));
+        metrics.CommentAdded();
         SetETag(review.Version);
         return CreatedAtAction(nameof(GetById), new { id }, review);
     }

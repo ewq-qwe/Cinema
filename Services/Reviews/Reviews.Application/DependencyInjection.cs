@@ -38,6 +38,7 @@ public static class DependencyInjection
         {
             o.SizeLimit = config.GetValue("Caching:MemorySizeLimitKb", 20_000);
             o.CompactionPercentage = 0.25;
+            o.TrackStatistics = true;   // Лаб. 07: gauge кількості записів L1
         });
         services.TryAddSingleton<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(sp =>
             new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
