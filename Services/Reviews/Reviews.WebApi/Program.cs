@@ -5,8 +5,11 @@ using Reviews.Infrastructure;
 using Reviews.WebApi.Errors;
 using Reviews.WebApi.Grpc;
 using Reviews.WebApi.HealthChecks;
+using Reviews.WebApi.IntegrationEvents;
 using Reviews.WebApi.Metrics;
 using Reviews.WebApi.Mapping;
+using Platform.EventBus;
+using Platform.EventBus.Events;
 using Platform.ServiceDefaults.Correlation;
 using Grpc.AspNetCore.HealthChecks;
 
@@ -39,6 +42,13 @@ builder.Services.Configure<GrpcHealthChecksOptions>(o => o.Services.Map("", r =>
 
 // ---------- Лаб. 07: бізнес-метрики (Meter "Reviews.WebApi") ----------
 builder.Services.AddSingleton<ReviewsMetrics>();
+
+// ---------- Лаб. 08: споживання подій Каталогу (RabbitMQ) — movieTitle у відгуках і обговореннях ----------
+// IConnection (singleton) + health check від Aspire; вбудоване трасування клієнта вимкнено — контекст відновлюється вручну
+builder.AddRabbitMQClient(EventBusExtensions.ConnectionName, settings => settings.DisableTracing = true);
+builder.Services.AddEventBus("reviews-api");
+builder.Services.AddEventHandler<MovieRenamedEvent, MovieRenamedEventHandler>();
+builder.Services.AddHostedService<CatalogEventsConsumer>();   // черга reviews.catalog-sync (binding movie.renamed)
 
 // ---------- AutoMapper: профілі Application (сутності → DTO) і WebApi (HTTP-моделі → команди) ----------
 builder.Services.AddAutoMapper(cfg =>

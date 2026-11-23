@@ -3,6 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Booking.Bll\Booking.Bll.csproj" />
     <ProjectReference Include="..\..\..\Platform.ServiceDefaults\Platform.ServiceDefaults.csproj" />
+    <!-- Лаб. 08: шина подій — споживач подій Каталогу (копія Movies) -->
+    <ProjectReference Include="..\..\..\Platform.EventBus\Platform.EventBus.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -2,8 +2,11 @@ using System.Reflection;
 using Catalog.Api.Errors;
 using Catalog.Api.Grpc;
 using Catalog.Api.HealthChecks;
+using Catalog.Api.IntegrationEvents;
 using Catalog.Api.Metrics;
 using Catalog.Bll.Caching;
+using Catalog.Bll.IntegrationEvents;
+using Platform.EventBus;
 using Catalog.Bll.Mapping;
 using Catalog.Bll.Services;
 using Catalog.Bll.Validators;
@@ -58,6 +61,14 @@ builder.Services.AddSingleton<CatalogMetrics>();
 
 // ---------- Лаб. 06: gRPC-сервер (interceptor логування — зі ServiceDefaults) ----------
 builder.Services.AddDefaultGrpc(detailedErrors: builder.Environment.IsDevelopment());
+
+// ---------- Лаб. 08: публікація integration events через RabbitMQ (transactional outbox) ----------
+// IConnection (singleton) + health check від Aspire; ресурс "messaging" в AppHost. Вбудоване трасування клієнта вимкнено:
+// контекст (traceparent) передається вручну в Platform.EventBus — так видно, як він переходить через брокер.
+builder.AddRabbitMQClient(EventBusExtensions.ConnectionName, settings => settings.DisableTracing = true);
+builder.Services.AddEventBus("catalog-api");                                         // IEventPublisher, метрики, CorrelationId
+builder.Services.AddScoped<ICatalogIntegrationEventService, CatalogIntegrationEventService>();
+builder.Services.AddHostedService<OutboxPublisherService>();                         // дошле події, що лишилися в outbox
 
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<IMovieService, MovieService>();

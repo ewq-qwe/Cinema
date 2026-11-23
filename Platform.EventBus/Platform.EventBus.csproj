@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Лаб. 08: спільна шина подій платформи на RabbitMQ — підключення, топологія, publisher, базовий consumer,
+       контракти integration events, передача контексту трасування й метрики. Бізнес-обробки тут немає. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Platform.ServiceDefaults\Platform.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Aspire-інтеграція: AddRabbitMQClient("messaging") реєструє IConnection (singleton), health check і телеметрію -->
+    <PackageReference Include="Aspire.RabbitMQ.Client" Version="13.6.5" />
+    <!-- Офіційний клієнт 7.x: повністю асинхронний API (IChannel, BasicPublishAsync, BasicConsumeAsync, BasicAckAsync) -->
+    <PackageReference Include="RabbitMQ.Client" Version="7.2.2" />
+    <!-- Пропагатор W3C traceparent (Propagators.DefaultTextMapPropagator); версія — як у ServiceDefaults -->
+    <PackageReference Include="OpenTelemetry.Api" Version="1.20.1" />
+  </ItemGroup>
+
+</Project>

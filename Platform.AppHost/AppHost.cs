@@ -1,5 +1,5 @@
-// Оркестрація .NET Aspire (Лаб. 05–06): одна команда піднімає всю платформу —
-// контейнери SQL Server, MongoDB і Redis з постійними томами, три мікросервіси (Лаб. 02–04), Aggregator і API Gateway.
+// Оркестрація .NET Aspire (Лаб. 05–08): одна команда піднімає всю платформу —
+// контейнери SQL Server, MongoDB, Redis і RabbitMQ з постійними томами, три мікросервіси (Лаб. 02–04), Aggregator і API Gateway.
 // AppHost не містить бізнес-логіки: лише ресурси, зв'язки (WithReference) і порядок запуску (WaitFor).
 //   dotnet run --project Platform.AppHost
 var builder = DistributedApplication.CreateBuilder(args);
@@ -38,6 +38,15 @@ var reviewsDb = mongo.AddDatabase("ReviewsDb", databaseName: "cinema_reviews"); 
 var redis = builder.AddRedis("redis")
                    .WithDataVolume("cinema-redis-data");
 
+// ---------- Лаб. 08: брокер повідомлень RabbitMQ — асинхронні integration events між сервісами ----------
+// Ім'я ресурсу "messaging" = ім'я рядка підключення, яке читає AddRabbitMQClient("messaging") у сервісах.
+// WithDataVolume — durable-черги й persistent-повідомлення переживають перезапуск контейнера;
+// WithManagementPlugin — веб-інтерфейс керування на фіксованому порту 15672 (exchanges, черги, bindings, DLQ).
+// Облікові дані генерує Aspire (параметри messaging-username / messaging-password, зберігаються в user-secrets AppHost).
+var rabbit = builder.AddRabbitMQ("messaging")
+                    .WithDataVolume("cinema-rabbitmq-data")
+                    .WithManagementPlugin(port: 15672);
+
 // ---------- Мікросервіси (Лаб. 02–04). Ім'я ресурсу = логічне ім'я для service discovery ----------
 // Лаб. 06: кожен сервіс має два endpoint-и в Kestrel:Endpoints свого appsettings.json — "http" (REST через Gateway)
 // і "grpc" з Protocols=Http2 (h2c без TLS для внутрішніх gRPC-викликів). Aspire бере їх з конфігурації сервісу
@@ -45,18 +54,21 @@ var redis = builder.AddRedis("redis")
 var booking = builder.AddProject<Projects.Booking_Api>("booking-api")
                      .WithReference(bookingDb)
                      .WaitFor(bookingDb)
+                     .WithReference(rabbit).WaitFor(rabbit)            // Лаб. 08: споживає події Каталогу (копія Movies)
                      .WithUrlForEndpoint("http", url => url.Url = "/swagger")
                      .WithHttpHealthCheck("/health/ready", endpointName: "http");   // Лаб. 07: стан у Dashboard; WaitFor чекає Healthy
 
 var catalog = builder.AddProject<Projects.Catalog_Api>("catalog-api")
                      .WithReference(catalogDb).WaitFor(catalogDb)
                      .WithReference(redis).WaitFor(redis)
+                     .WithReference(rabbit).WaitFor(rabbit)            // Лаб. 08: публікує події про фільми (catalog-events)
                      .WithUrlForEndpoint("http", url => url.Url = "/swagger")
                      .WithHttpHealthCheck("/health/ready", endpointName: "http");   // Лаб. 07: стан у Dashboard; WaitFor чекає Healthy
 
 var reviews = builder.AddProject<Projects.Reviews_WebApi>("reviews-api")
                      .WithReference(reviewsDb).WaitFor(reviewsDb)
                      .WithReference(redis).WaitFor(redis)
+                     .WithReference(rabbit).WaitFor(rabbit)            // Лаб. 08: споживає події Каталогу (movieTitle у відгуках)
                      .WithUrlForEndpoint("http", url => url.Url = "/swagger")
                      .WithHttpHealthCheck("/health/ready", endpointName: "http");   // Лаб. 07: стан у Dashboard; WaitFor чекає Healthy
 

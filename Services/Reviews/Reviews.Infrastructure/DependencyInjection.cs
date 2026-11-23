@@ -50,6 +50,7 @@ public static class DependencyInjection
         services.AddScoped<IMessageRepository, MessageRepository>();
         services.AddScoped<IReviewQueries, ReviewQueries>();
         services.AddScoped<IDiscussionQueries, DiscussionQueries>();
+        services.AddScoped<ICatalogSyncRepository, CatalogSyncRepository>();   // Лаб. 08: movieTitle з подій Каталогу
 
         // Порядок: спершу індекси (унікальний індекс має існувати до вставки даних), потім сідінг
         services.AddSingleton<IDataSeeder, DiscussionSeeder>();

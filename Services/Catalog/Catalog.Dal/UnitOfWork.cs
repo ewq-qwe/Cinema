@@ -23,12 +23,26 @@ public sealed class UnitOfWork : IUnitOfWork
         Genres = new GenreRepository(context);
         MovieCredits = new MovieCreditRepository(context);
         People = new GenericRepository<Person>(context);
+        IntegrationEventLog = new IntegrationEventLogRepository(context);
     }
 
     public IMovieRepository Movies { get; }
     public IGenreRepository Genres { get; }
     public IMovieCreditRepository MovieCredits { get; }
     public IGenericRepository<Person> People { get; }
+    public IIntegrationEventLogRepository IntegrationEventLog { get; }
+
+    public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> operation, CancellationToken ct = default)
+    {
+        // Через execution strategy: якщо для SQL Server увімкнено повтори, вся транзакція повторюється цілком
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async token =>
+        {
+            await using var transaction = await _context.Database.BeginTransactionAsync(token);
+            await operation(token);
+            await transaction.CommitAsync(token);   // без коміту DisposeAsync відкотить усе
+        }, ct);
+    }
 
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)
     {

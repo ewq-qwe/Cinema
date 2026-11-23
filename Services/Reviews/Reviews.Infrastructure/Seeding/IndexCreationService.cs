@@ -55,7 +55,14 @@ public sealed class IndexCreationService(
                     new CreateIndexOptions { Name = "ix_messages_discussion_cursor" })
             ], ct);
 
-            logger.LogInformation("MongoDB: індекси колекцій reviews, discussions, messages на місці");
+            // Лаб. 08: журнал оброблених подій. Унікальність EventId дає сам _id; TTL-індекс прибирає записи через 30 днів —
+            // вікно дедуплікації набагато більше за час можливої повторної доставки (хвилини / години)
+            await context.Database.GetCollection<MongoDB.Bson.BsonDocument>(Persistence.Repositories.CatalogSyncRepository.ProcessedEventsCollection)
+                .Indexes.CreateOneAsync(new CreateIndexModel<MongoDB.Bson.BsonDocument>(
+                    Builders<MongoDB.Bson.BsonDocument>.IndexKeys.Ascending("processedAt"),
+                    new CreateIndexOptions { Name = "ttl_processed_events", ExpireAfter = TimeSpan.FromDays(30) }), cancellationToken: ct);
+
+            logger.LogInformation("MongoDB: індекси колекцій reviews, discussions, messages, processedEvents на місці");
         }
         catch (Exception ex) when (ex is MongoException or TimeoutException)
         {

@@ -45,6 +45,12 @@ public static class Extensions
     /// </summary>
     private static readonly string[] BusinessMeters = ["Booking.Api", "Catalog.Api", "Reviews.WebApi", "Platform.Aggregator", "Polly"];
 
+    /// <summary>
+    /// Лаб. 08: шина подій (Platform.EventBus) — ActivitySource spans публікації (Producer) і обробки (Consumer),
+    /// відновлених із заголовка traceparent, та Meter (messaging.published / consumed / dlq.depth).
+    /// </summary>
+    private const string MessagingSource = "Platform.Messaging";
+
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         builder.ConfigureSerilog();
@@ -88,6 +94,7 @@ public static class Extensions
             .MinimumLevel.Override("MongoDB", LogEventLevel.Warning)
             .MinimumLevel.Override("Yarp", LogEventLevel.Information)
             .MinimumLevel.Override("Grpc", LogEventLevel.Warning)                 // внутрішні Debug-логи gRPC на кожне повідомлення; свої логи — в interceptor
+            .MinimumLevel.Override("RabbitMQ", LogEventLevel.Warning)             // внутрішні логи клієнта RabbitMQ; рішення щодо повідомлень логує Platform.EventBus
             .ReadFrom.Configuration(builder.Configuration)   // точкові перевизначення рівнів з appsettings сервісу
             .ReadFrom.Services(services)
             .Enrich.FromLogContext()
@@ -129,13 +136,15 @@ public static class Extensions
                 .AddRuntimeInstrumentation()
                 .AddMeter(serviceName)                               // власні метрики сервісу (напр., Gateway)
                 .AddMeter(CacheMeters)                               // метрики кешу (Лаб. 06)
-                .AddMeter(BusinessMeters))                           // бізнес-метрики й Polly (Лаб. 07)
+                .AddMeter(BusinessMeters)                            // бізнес-метрики й Polly (Лаб. 07)
+                .AddMeter(MessagingSource))                          // метрики шини подій (Лаб. 08)
             .WithTracing(t => t
                 .SetSampler(CreateSampler(builder))
                 .AddSource(serviceName)                              // власні spans застосунку (напр., Platform.Aggregator)
                 .AddSource(BusinessActivitySources)                  // spans бізнес-операцій сервісів
                 .AddSource(MongoActivitySource)                      // MongoDB (Лаб. 04)
                 .AddSource("Grpc.Net.Client")                        // клієнтський span gRPC-виклику (Лаб. 06): батько для HTTP/2-запиту
+                .AddSource(MessagingSource)                          // публікація й обробка подій через RabbitMQ (Лаб. 08)
                 .AddAspNetCoreInstrumentation(o =>
                     o.Filter = ctx => !ctx.Request.Path.StartsWithSegments(HealthEndpointPath)
                                       && !ctx.Request.Path.StartsWithSegments(AlivenessEndpointPath))

@@ -2,11 +2,15 @@ using System.Reflection;
 using Booking.Api.Errors;
 using Booking.Api.Grpc;
 using Booking.Api.HealthChecks;
+using Booking.Api.IntegrationEvents;
 using Booking.Api.Metrics;
 using Booking.Bll.Mapping;
 using Booking.Bll.Services;
 using Booking.Dal;
 using Booking.Dal.Abstractions;
+using Booking.Dal.Migrations;
+using Platform.EventBus;
+using Platform.EventBus.Events;
 using Platform.ServiceDefaults.Correlation;
 using Grpc.AspNetCore.HealthChecks;
 
@@ -58,6 +62,16 @@ builder.Services.Configure<GrpcHealthChecksOptions>(o => o.Services.Map("", r =>
 builder.Services.AddSingleton<BookingMetrics>();
 builder.Services.AddHostedService<BookingSnapshotService>();
 
+// ---------- Лаб. 08: споживання подій Каталогу (RabbitMQ) — оновлення локальної копії довідника Movies ----------
+// IConnection (singleton) + health check від Aspire; вбудоване трасування клієнта вимкнено — контекст відновлюється вручну
+builder.AddRabbitMQClient(EventBusExtensions.ConnectionName, settings => settings.DisableTracing = true);
+builder.Services.AddEventBus("booking-api");
+builder.Services.AddEventHandler<MovieCreatedEvent, MovieCreatedHandler>();                           // окремий обробник
+builder.Services.AddEventHandler<MovieRenamedEvent, MovieRenamedHandler>();                           // на кожен тип події,
+builder.Services.AddEventHandler<MovieScreeningInfoChangedEvent, MovieScreeningInfoChangedHandler>(); // Scoped — свій UoW
+builder.Services.AddEventHandler<MovieArchivedEvent, MovieArchivedHandler>();                         // на повідомлення
+builder.Services.AddHostedService<CatalogEventsConsumer>();                                           // черга booking.catalog-sync
+
 // ---------- OpenAPI / Swagger ----------
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(o =>
@@ -73,6 +87,15 @@ builder.Services.AddSwaggerGen(o =>
 });
 
 var app = builder.Build();
+
+// ---------- Лаб. 08: міграції схеми після Лаб. 01 (dbo.ProcessedEvents, Movies.CatalogUpdatedAt / IsArchived) ----------
+// Виконуються до старту споживача (hosted services стартують у app.Run), тож обробники вже бачать нові таблиці.
+if (app.Configuration.GetValue("Database:MigrateOnStartup", true))
+{
+    var applied = await SchemaMigrator.MigrateAsync(connectionString);
+    if (applied.Count > 0)
+        app.Logger.LogInformation("Applied schema migrations {Migrations}", applied);
+}
 
 // CorrelationId + межі запиту — зовнішнім шаром, щоб у лог потрапляв фінальний статус (404/409), а не виняток як 500
 app.UseMiddleware<CorrelationIdMiddleware>();
