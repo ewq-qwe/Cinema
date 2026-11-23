@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Platform.Aggregator.Caching;
 using Platform.Aggregator.Clients;
+using Platform.Aggregator.Metrics;
 using Platform.Aggregator.Models;
 using Platform.Aggregator.Services;
 
@@ -16,7 +17,8 @@ namespace Platform.Aggregator.Controllers;
 public sealed class AggregatorController(
     [FromKeyedServices(Transports.Grpc)] IAggregationService grpc,
     [FromKeyedServices(Transports.Http)] IAggregationService http,
-    AggregatedResponseCache cache) : ControllerBase
+    AggregatedResponseCache cache,
+    AggregatorMetrics metrics) : ControllerBase
 {
     /// <summary>
     /// Повна картка бронювання: бронювання й сеанс (booking-api), фільм (catalog-api), рейтинг і останні відгуки (reviews-api).
@@ -32,7 +34,7 @@ public sealed class AggregatorController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable)]
     public Task<IActionResult> GetBookingCard(long id, [FromQuery] string transport = Transports.Grpc,
         [FromQuery] bool useCache = true, CancellationToken ct = default) =>
-        Aggregate(AggregatedResponseCache.BookingKey(id), useCache,
+        Aggregate("booking", transport, AggregatedResponseCache.BookingKey(id), useCache,
             () => Pick(transport).GetBookingCardAsync(id, ct), card => card.Warnings, $"Бронювання {id} не знайдено.", ct);
 
     /// <summary>Картка фільму: фільм (catalog-api), найближчі сеанси (booking-api), рейтинг і відгуки (reviews-api).</summary>
@@ -46,13 +48,13 @@ public sealed class AggregatorController(
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status503ServiceUnavailable)]
     public Task<IActionResult> GetMovieCard(int id, [FromQuery] string transport = Transports.Grpc,
         [FromQuery] bool useCache = true, CancellationToken ct = default) =>
-        Aggregate(AggregatedResponseCache.MovieKey(id), useCache,
+        Aggregate("movie", transport, AggregatedResponseCache.MovieKey(id), useCache,
             () => Pick(transport).GetMovieCardAsync(id, ct), card => card.Warnings, $"Фільм {id} не знайдено в Каталозі.", ct);
 
     private IAggregationService Pick(string transport) =>
         string.Equals(transport, Transports.Http, StringComparison.OrdinalIgnoreCase) ? http : grpc;
 
-    private async Task<IActionResult> Aggregate<T>(string key, bool useCache, Func<Task<T?>> aggregate,
+    private async Task<IActionResult> Aggregate<T>(string cardName, string transport, string key, bool useCache, Func<Task<T?>> aggregate,
         Func<T, IReadOnlyList<string>> warnings, string notFound, CancellationToken ct) where T : class
     {
         // Кеш перевіряється ДО паралельних викликів сервісів
@@ -65,7 +67,9 @@ public sealed class AggregatorController(
 
         try
         {
-            var card = await aggregate();
+            // Лаб. 07: тривалість і результат агрегації (full / partial / not_found / unavailable) — у метриках
+            var card = await metrics.MeasureAsync(cardName, Pick(transport) == http ? Transports.Http : Transports.Grpc, aggregate,
+                c => c is null ? "not_found" : warnings(c).Count > 0 ? "partial" : "full");
             if (card is null)
                 return Problem(statusCode: StatusCodes.Status404NotFound, title: "Ресурс не знайдено", detail: notFound);
 

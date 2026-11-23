@@ -1,3 +1,4 @@
+using Catalog.Api.Metrics;
 using Catalog.Bll.Dtos;
 using Catalog.Bll.Services;
 using FluentValidation;
@@ -9,7 +10,8 @@ namespace Catalog.Api.Controllers;
 [ApiController]
 [Route("api/movies")]
 [Produces("application/json")]
-public sealed class MoviesController(IMovieService movies) : ControllerBase
+// Лаб. 07: операції вимірюються (catalog.operation.duration) і рахуються бізнес-лічильниками (CatalogMetrics).
+public sealed class MoviesController(IMovieService movies, CatalogMetrics metrics) : ControllerBase
 {
     /// <summary>Список фільмів: пагінація, фільтри (назва, жанр, роки, рейтинг) і сортування — виконуються в SQL.</summary>
     [HttpGet]
@@ -30,8 +32,11 @@ public sealed class MoviesController(IMovieService movies) : ControllerBase
     [HttpGet("{id:int}")]
     [ProducesResponseType<MovieDto>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<MovieDto>> GetById(int id, CancellationToken ct) =>
-        Ok(await movies.GetByIdAsync(id, ct));
+    public async Task<ActionResult<MovieDto>> GetById(int id, CancellationToken ct)
+    {
+        metrics.CardRequested("rest");
+        return Ok(await metrics.MeasureAsync("get-card", () => movies.GetByIdAsync(id, ct)));
+    }
 
     /// <summary>Додати фільм. Дубль «назва + рік» → 409.</summary>
     [HttpPost]
@@ -44,7 +49,8 @@ public sealed class MoviesController(IMovieService movies) : ControllerBase
         var validation = await validator.ValidateAsync(input, ct);
         if (!validation.IsValid) return this.ValidationProblem(validation);
 
-        var created = await movies.CreateAsync(input, ct);
+        var created = await metrics.MeasureAsync("create", () => movies.CreateAsync(input, ct));
+        metrics.MovieCreated(created.AgeRating);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
@@ -59,7 +65,9 @@ public sealed class MoviesController(IMovieService movies) : ControllerBase
     {
         var validation = await validator.ValidateAsync(input, ct);
         if (!validation.IsValid) return this.ValidationProblem(validation);
-        return Ok(await movies.UpdateAsync(id, input, ct));
+        var updated = await metrics.MeasureAsync("update", () => movies.UpdateAsync(id, input, ct));
+        metrics.MovieUpdated("details");
+        return Ok(updated);
     }
 
     /// <summary>Створити або оновити опис фільму (1:1).</summary>
@@ -72,7 +80,9 @@ public sealed class MoviesController(IMovieService movies) : ControllerBase
     {
         var validation = await validator.ValidateAsync(input, ct);
         if (!validation.IsValid) return this.ValidationProblem(validation);
-        return Ok(await movies.SetDetailAsync(id, input, ct));
+        var updated = await metrics.MeasureAsync("set-detail", () => movies.SetDetailAsync(id, input, ct));
+        metrics.MovieUpdated("description");
+        return Ok(updated);
     }
 
     /// <summary>Додати людину в титри (M:N з власними полями). Порушення правил титрів → 409.</summary>
@@ -86,7 +96,9 @@ public sealed class MoviesController(IMovieService movies) : ControllerBase
     {
         var validation = await validator.ValidateAsync(input, ct);
         if (!validation.IsValid) return this.ValidationProblem(validation);
-        return Ok(await movies.AddCreditAsync(id, input, ct));
+        var updated = await metrics.MeasureAsync("add-credit", () => movies.AddCreditAsync(id, input, ct));
+        metrics.MovieUpdated("credits");
+        return Ok(updated);
     }
 
     /// <summary>Прибрати людину з титрів.</summary>
@@ -96,7 +108,8 @@ public sealed class MoviesController(IMovieService movies) : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> RemoveCredit(int id, int personId, string role, CancellationToken ct)
     {
-        await movies.RemoveCreditAsync(id, personId, role, ct);
+        await metrics.MeasureAsync("remove-credit", () => movies.RemoveCreditAsync(id, personId, role, ct));
+        metrics.MovieUpdated("credits");
         return NoContent();
     }
 
@@ -106,7 +119,8 @@ public sealed class MoviesController(IMovieService movies) : ControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Archive(int id, CancellationToken ct)
     {
-        await movies.ArchiveAsync(id, ct);
+        await metrics.MeasureAsync("archive", () => movies.ArchiveAsync(id, ct));
+        metrics.MovieUpdated("archive");
         return NoContent();
     }
 }

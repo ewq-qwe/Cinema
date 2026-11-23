@@ -1,14 +1,14 @@
 using System.Reflection;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Reviews.Application;
 using Reviews.Application.Common.Mapping;
 using Reviews.Infrastructure;
-using Reviews.Infrastructure.Persistence;
 using Reviews.WebApi.Errors;
 using Reviews.WebApi.Grpc;
+using Reviews.WebApi.HealthChecks;
 using Reviews.WebApi.Metrics;
 using Reviews.WebApi.Mapping;
 using Platform.ServiceDefaults.Correlation;
+using Grpc.AspNetCore.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,8 +28,17 @@ builder.AddRedisDistributedCache("redis",
     options => { options.AbortOnConnectFail = false; options.ConnectTimeout = 1000; options.SyncTimeout = 1000; options.AsyncTimeout = 1000; });
 
 // ---------- Лаб. 06: gRPC-сервер (interceptor логування — зі ServiceDefaults) ----------
-builder.Services.AddHealthChecks().AddCheck<CacheHealthCheck>("cache");   // статистика кешу L1 / L2 у /health
 builder.Services.AddDefaultGrpc(detailedErrors: builder.Environment.IsDevelopment());
+
+// ---------- Лаб. 07: health checks — MongoDB (Unhealthy) і Redis (Degraded) у readiness + gRPC Health Checking Protocol ----------
+builder.Services.AddReviewsHealthChecks();
+// grpc.health.v1.Health (стандартний gRPC Health Checking Protocol) — його викликає Aggregator.
+// Мапимо лише перевірки БД: gRPC-статус означає «можу обслуговувати запити»; відмова кешу (Degraded) не робить сервіс NOT_SERVING.
+builder.Services.AddGrpcHealthChecks();
+builder.Services.Configure<GrpcHealthChecksOptions>(o => o.Services.Map("", r => r.Tags.Contains(HealthTags.Database)));
+
+// ---------- Лаб. 07: бізнес-метрики (Meter "Reviews.WebApi") ----------
+builder.Services.AddSingleton<ReviewsMetrics>();
 
 // ---------- AutoMapper: профілі Application (сутності → DTO) і WebApi (HTTP-моделі → команди) ----------
 builder.Services.AddAutoMapper(cfg =>
@@ -46,11 +55,6 @@ builder.Services.AddProblemDetails(o => o.CustomizeProblemDetails = ctx =>
     ctx.ProblemDetails.Extensions["traceId"] = ctx.HttpContext.TraceIdentifier;
 });
 builder.Services.AddExceptionHandler<ExceptionToProblemDetailsHandler>();
-
-// ---------- Health check підключення до MongoDB (детально — Лаб. 07) ----------
-builder.Services.AddHealthChecks()
-    .AddMongoDb(sp => sp.GetRequiredService<MongoDbContext>().Database,
-        name: "mongodb", failureStatus: HealthStatus.Unhealthy, tags: ["ready"], timeout: TimeSpan.FromSeconds(3));
 
 builder.Services.AddControllers();
 
@@ -83,7 +87,8 @@ if (!app.Environment.IsProduction())
 
 app.MapControllers();
 app.MapGrpcService<ReviewsGrpcService>();   // HTTP/2 (endpoint "grpc" в AppHost)
-app.MapDefaultEndpoints();   // /health (разом із перевіркою MongoDB) і /alive
+app.MapGrpcHealthChecksService();            // grpc.health.v1.Health/Check — його викликає Aggregator
+app.MapDefaultEndpoints();   // /health/live, /health/ready, /health, /alive
 app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 
 app.Run();

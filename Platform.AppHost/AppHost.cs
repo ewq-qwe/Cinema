@@ -45,24 +45,32 @@ var redis = builder.AddRedis("redis")
 var booking = builder.AddProject<Projects.Booking_Api>("booking-api")
                      .WithReference(bookingDb)
                      .WaitFor(bookingDb)
-                     .WithUrlForEndpoint("http", url => url.Url = "/swagger");
+                     .WithUrlForEndpoint("http", url => url.Url = "/swagger")
+                     .WithHttpHealthCheck("/health/ready", endpointName: "http");   // Лаб. 07: стан у Dashboard; WaitFor чекає Healthy
 
 var catalog = builder.AddProject<Projects.Catalog_Api>("catalog-api")
                      .WithReference(catalogDb).WaitFor(catalogDb)
                      .WithReference(redis).WaitFor(redis)
-                     .WithUrlForEndpoint("http", url => url.Url = "/swagger");
+                     .WithUrlForEndpoint("http", url => url.Url = "/swagger")
+                     .WithHttpHealthCheck("/health/ready", endpointName: "http");   // Лаб. 07: стан у Dashboard; WaitFor чекає Healthy
 
 var reviews = builder.AddProject<Projects.Reviews_WebApi>("reviews-api")
                      .WithReference(reviewsDb).WaitFor(reviewsDb)
                      .WithReference(redis).WaitFor(redis)
-                     .WithUrlForEndpoint("http", url => url.Url = "/swagger");
+                     .WithUrlForEndpoint("http", url => url.Url = "/swagger")
+                     .WithHttpHealthCheck("/health/ready", endpointName: "http");   // Лаб. 07: стан у Dashboard; WaitFor чекає Healthy
 
 // ---------- Aggregator: gRPC-клієнт трьох сервісів + кеш агрегатів у Redis; стартує після них ----------
 var aggregator = builder.AddProject<Projects.Platform_Aggregator>("aggregator")
                         .WithReference(booking).WithReference(catalog).WithReference(reviews)
                         .WithReference(redis).WaitFor(redis)
                         .WaitFor(booking).WaitFor(catalog).WaitFor(reviews)
-                        .WithUrlForEndpoint("http", url => url.Url = "/swagger");
+                        .WithUrlForEndpoint("http", url => url.Url = "/swagger")
+                     .WithHttpHealthCheck("/health/ready", endpointName: "http");   // Лаб. 07: стан у Dashboard; WaitFor чекає Healthy
+
+// Лаб. 07: WithHttpHealthCheck("/health/ready") — Dashboard показує Healthy / Degraded / Unhealthy кожного ресурсу,
+// а WaitFor тепер чекає, поки залежність стане ЗДОРОВОЮ (БД, Redis, gRPC-залежності), а не лише запуститься.
+// Endpoint "http" вказано явно: поруч є HTTP/2-only "grpc", на який HTTP/1.1-перевірка потрапляти не повинна.
 
 // ---------- API Gateway: єдина точка входу на фіксованому порту 5000 ----------
 // Порядок запуску: БД → сервіси → Aggregator → Gateway
@@ -70,6 +78,7 @@ builder.AddProject<Projects.Platform_ApiGateway>("gateway")
        .WithHttpEndpoint(port: 5000, name: "public")
        .WithReference(booking).WithReference(catalog).WithReference(reviews)
        .WithReference(aggregator)
-       .WaitFor(aggregator);
+       .WaitFor(aggregator)
+       .WithHttpHealthCheck("/health/ready", endpointName: "http");
 
 builder.Build().Run();

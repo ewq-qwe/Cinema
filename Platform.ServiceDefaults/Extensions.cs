@@ -27,6 +27,8 @@ public static class Extensions
 {
     private const string HealthEndpointPath = "/health";
     private const string AlivenessEndpointPath = "/alive";
+    public const string LivenessEndpointPath = "/health/live";
+    public const string ReadinessEndpointPath = "/health/ready";
 
     /// <summary>Джерело власних spans MongoDB-драйвера (підписка — DiagnosticsActivityEventSubscriber у сервісі відгуків).</summary>
     public const string MongoActivitySource = "MongoDB.Driver.Core.Extensions.DiagnosticSources";
@@ -36,6 +38,12 @@ public static class Extensions
 
     /// <summary>Meter-и кешу (Лаб. 06): cache.hits / cache.misses з тегом cache.level (L1 | L2).</summary>
     private static readonly string[] CacheMeters = ["Catalog.Cache", "Reviews.Cache", "Platform.Aggregator.Cache"];
+
+    /// <summary>
+    /// Лаб. 07: бізнес-метрики сервісів (Meter = назва сервісу) і телеметрія resilience — Meter "Polly"
+    /// (resilience.polly.strategy.events з event.name = OnRetry / OnCircuitOpened / OnTimeout тощо).
+    /// </summary>
+    private static readonly string[] BusinessMeters = ["Booking.Api", "Catalog.Api", "Reviews.WebApi", "Platform.Aggregator", "Polly"];
 
     public static TBuilder AddServiceDefaults<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
@@ -120,7 +128,8 @@ public static class Extensions
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation()
                 .AddMeter(serviceName)                               // власні метрики сервісу (напр., Gateway)
-                .AddMeter(CacheMeters))                              // метрики кешу
+                .AddMeter(CacheMeters)                               // метрики кешу (Лаб. 06)
+                .AddMeter(BusinessMeters))                           // бізнес-метрики й Polly (Лаб. 07)
             .WithTracing(t => t
                 .SetSampler(CreateSampler(builder))
                 .AddSource(serviceName)                              // власні spans застосунку (напр., Platform.Aggregator)
@@ -161,15 +170,15 @@ public static class Extensions
         return services;
     }
 
+    /// <summary>Перевірка «процес живий» — без зовнішніх залежностей, тег live (liveness).</summary>
     public static TBuilder AddDefaultHealthChecks<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         builder.Services.AddHealthChecks()
-            .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
+            .AddCheck("self", () => HealthCheckResult.Healthy("Процес відповідає."), [HealthTags.Live]);
         return builder;
     }
 
-    /// <summary>/health — усі перевірки (у т. ч. бази даних); /alive — лише «процес живий».</summary>
-    /// <summary>JSON-звіт /health: статус кожної перевірки та її дані (напр., hit ratio кешу L1 / L2).</summary>
+    /// <summary>JSON-звіт: статус кожної перевірки, її теги, тривалість, дані й причину збою.</summary>
     private static Task WriteHealthJson(Microsoft.AspNetCore.Http.HttpContext context, HealthReport report)
     {
         context.Response.ContentType = "application/json; charset=utf-8";
@@ -181,18 +190,57 @@ public static class Extensions
             {
                 status = e.Value.Status.ToString(),
                 description = e.Value.Description,
+                durationMs = Math.Round(e.Value.Duration.TotalMilliseconds, 1),
+                tags = e.Value.Tags,
+                error = e.Value.Exception?.Message,
                 data = e.Value.Data.Count == 0 ? null : e.Value.Data
             })
         }, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
         {
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         }));
     }
 
+    /// <summary>
+    /// Endpoints стану (Лаб. 07). Публікуються в усіх середовищах — їх використовують оркестратор (Kubernetes, Лаб. 10)
+    /// і Aspire (WithHttpHealthCheck):
+    /// <list type="bullet">
+    /// <item><c>/health/live</c> — liveness: лише перевірки з тегом live (процес живий), без зовнішніх залежностей; збій → перезапуск;</item>
+    /// <item><c>/health/ready</c> — readiness: перевірки з тегом ready (БД, Redis, gRPC-залежності); збій → сервіс виключають з балансування;</item>
+    /// <item><c>/health</c> — усі перевірки (разом зі статистикою кешу) для людини; <c>/alive</c> — сумісність із шаблоном Aspire.</item>
+    /// </list>
+    /// Degraded (напр., недоступний Redis) відповідає 200: сервіс працює далі, лише повільніше.
+    /// </summary>
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
+        app.MapHealthChecks(LivenessEndpointPath, new HealthCheckOptions
+        {
+            Predicate = r => r.Tags.Contains(HealthTags.Live),
+            ResponseWriter = WriteHealthJson
+        });
+        app.MapHealthChecks(ReadinessEndpointPath, new HealthCheckOptions
+        {
+            Predicate = r => r.Tags.Contains(HealthTags.Ready),
+            ResponseWriter = WriteHealthJson
+        });
         app.MapHealthChecks(HealthEndpointPath, new HealthCheckOptions { ResponseWriter = WriteHealthJson });
-        app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
+        app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions { Predicate = r => r.Tags.Contains(HealthTags.Live) });
         return app;
     }
+}
+
+/// <summary>Єдині теги health checks для всіх сервісів платформи.</summary>
+public static class HealthTags
+{
+    /// <summary>Liveness: процес живий (без зовнішніх залежностей).</summary>
+    public const string Live = "live";
+
+    /// <summary>Readiness: залежності, без яких сервіс не може обслуговувати трафік (або обслуговує в режимі Degraded).</summary>
+    public const string Ready = "ready";
+
+    public const string Database = "database";
+    public const string Cache = "cache";
+    public const string Grpc = "grpc";
+    public const string Downstream = "downstream";
 }

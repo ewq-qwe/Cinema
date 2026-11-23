@@ -5,12 +5,13 @@ using Reviews.Application.Discussions.Commands.CreateDiscussion;
 using Reviews.Application.Discussions.Commands.PostMessage;
 using Reviews.Application.Discussions.Queries.GetDiscussions;
 using Reviews.WebApi.Contracts;
+using Reviews.WebApi.Metrics;
 
 namespace Reviews.WebApi.Controllers;
 
 /// <summary>Обговорення фільмів (колекції discussions і messages).</summary>
 [Route("api/discussions")]
-public sealed class DiscussionsController(IMapper mapper) : ApiControllerBase
+public sealed class DiscussionsController(IMapper mapper, ReviewsMetrics metrics) : ApiControllerBase
 {
     /// <summary>Стрічка тем: закріплені й найактивніші зверху; останні повідомлення вже вбудовано.</summary>
     [HttpGet]
@@ -57,7 +58,8 @@ public sealed class DiscussionsController(IMapper mapper) : ApiControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<MessageDto>> PostMessage(string id, PostMessageRequest request, CancellationToken ct)
     {
-        var message = await Mediator.Send(mapper.Map<PostMessageCommand>(request) with { DiscussionId = id }, ct);
+        var message = await metrics.MeasureAsync("post-message", () => Mediator.Send(mapper.Map<PostMessageCommand>(request) with { DiscussionId = id }, ct));
+        metrics.MessagePosted();
         return CreatedAtAction(nameof(GetMessages), new { id }, message);
     }
 }
